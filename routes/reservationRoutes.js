@@ -3,21 +3,62 @@ const express = require('express');
 const router = express.Router();
 const reservationController = require('../controllers/reservationController');
 const authMiddleware = require('../middlewares/authMiddleware');
-const roleMiddleware = require('../middlewares/roleMiddleware');
+const permissionMiddleware = require('../middlewares/permissionMiddleware');
 
-// Criar nova reserva
-router.post('/', authMiddleware, roleMiddleware(['Gerente', 'Garçom']), reservationController.createReservation);
+// Rotas avançadas
+router.get(
+  '/advanced',
+  authMiddleware,
+  permissionMiddleware(['viewReservation']),
+  reservationController.getReservationsAdvanced
+);
+
+// Criar reserva
+router.post(
+  '/',
+  authMiddleware,
+  permissionMiddleware(['createReservation']),
+  reservationController.createReservation
+);
 
 // Obter todas as reservas
-router.get('/', authMiddleware, roleMiddleware(['Gerente', 'Garçom']), reservationController.getReservations);
+router.get(
+  '/',
+  authMiddleware,
+  permissionMiddleware(['viewReservation']),
+  reservationController.getReservations
+);
 
-// Obter uma reserva por ID
-router.get('/:id', authMiddleware, roleMiddleware(['Gerente', 'Garçom']), reservationController.getReservationById);
+// Obter reserva por ID
+router.get(
+  '/:reservationId',
+  authMiddleware,
+  permissionMiddleware(['viewReservation']),
+  reservationController.getReservationById
+);
 
-// Atualizar uma reserva
-router.put('/:id', authMiddleware, roleMiddleware(['Gerente', 'Garçom']), reservationController.updateReservation);
+// Atualizar reserva
+router.put(
+  '/:reservationId',
+  authMiddleware,
+  permissionMiddleware(['editReservation']),
+  reservationController.updateReservation
+);
 
-// Excluir uma reserva
-router.delete('/:id', authMiddleware, roleMiddleware(['Gerente']), reservationController.deleteReservation);
+// Deletar reserva
+router.delete(
+  '/:reservationId',
+  authMiddleware,
+  permissionMiddleware(['deleteReservation']),
+  reservationController.deleteReservation
+);
+
+// Obter mesas disponíveis para uma data específica
+router.get(
+  '/tables/available',
+  authMiddleware,
+  permissionMiddleware(['viewReservation']),
+  reservationController.getReservationsAdvanced
+);
 
 module.exports = router;

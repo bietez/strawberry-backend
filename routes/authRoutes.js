@@ -1,4 +1,3 @@
-// routes/authRoutes.js
 const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
@@ -13,4 +12,7 @@ router.post('/login', authController.login);
 router.post('/forgot-password', authController.requestPasswordReset);
 router.post('/reset-password', authController.resetPasswordWithOTP);
 
+
+// Rota para atualizar usuário
+router.put('/users/:id', authMiddleware, roleMiddleware(['admin', 'manager']), authController.updateUser);
 module.exports = router;

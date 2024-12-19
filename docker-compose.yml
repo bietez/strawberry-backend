@@ -1,11 +1,49 @@
 services:
-  mongo:
+  mongo1:
     image: mongo
-    container_name: cash-register-banco
+    container_name: cash-register-banco1
     ports:
       - "27017:27017"
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin
       MONGO_INITDB_ROOT_PASSWORD: password
+    command: >
+      mongod --replSet rs0 --bind_ip_all
     volumes:
-      - ./mongo-data:/data/db
+      - ./mongo-data1:/data/db
+    networks:
+      - mongoCluster
+
+  mongo2:
+    image: mongo
+    container_name: cash-register-banco2
+    ports:
+      - "27018:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+    command: >
+      mongod --replSet rs0 --bind_ip_all
+    volumes:
+      - ./mongo-data2:/data/db
+    networks:
+      - mongoCluster
+
+  mongo3:
+    image: mongo
+    container_name: cash-register-banco3
+    ports:
+      - "27019:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+    command: >
+      mongod --replSet rs0 --bind_ip_all
+    volumes:
+      - ./mongo-data3:/data/db
+    networks:
+      - mongoCluster
+
+networks:
+  mongoCluster:
+    driver: bridge

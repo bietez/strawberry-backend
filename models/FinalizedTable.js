@@ -1,7 +1,7 @@
-// models/FinalizedTable.js
+// src/models/FinalizedTable.js
 const mongoose = require('mongoose');
 
-const finalizedTableSchema = new mongoose.Schema({
+const FinalizedTableSchema = new mongoose.Schema({
   numeroMesa: {
     type: Number,
     required: true,
@@ -13,19 +13,23 @@ const finalizedTableSchema = new mongoose.Schema({
   },
   garcomId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Employee',
+    ref: 'User',
+    required: true,
   },
   pedidos: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Order' }],
   valorTotal: {
     type: Number,
     required: true,
   },
+  formaPagamento: { type: String, enum: ['dinheiro', 'cartao', 'pix'], default: 'dinheiro' },
+  valorPago: { type: Number, default: 0 },
+  tipoDesconto: { type: String, enum: ['nenhum', 'porcentagem', 'valor'], default: 'nenhum' },
+  valorDesconto: { type: Number, default: 0 },
   dataFinalizacao: {
     type: Date,
     default: Date.now,
   },
-});
+  pdfPath: { type: String }, // Caminho do PDF gerado
+}, { timestamps: true });
 
-const FinalizedTable = mongoose.model('FinalizedTable', finalizedTableSchema);
-
-module.exports = FinalizedTable;
+module.exports = mongoose.model('FinalizedTable', FinalizedTableSchema);

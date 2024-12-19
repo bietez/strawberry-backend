@@ -1,15 +1,28 @@
 // routes/customerRoutes.js
 const express = require('express');
 const router = express.Router();
-const customerController = require('../controllers/customerController');
-const authMiddleware = require('../middlewares/authMiddleware');
-const roleMiddleware = require('../middlewares/roleMiddleware');
+const {
+  createCustomer,
+  getCustomers,
+  getCustomerById,
+  updateCustomer,
+  deleteCustomer,
+  getCustomersAdvanced, // Importando o novo método
+} = require('../controllers/customerController');
 
-// Rotas para clientes
-router.post('/', authMiddleware, roleMiddleware(['Gerente']), customerController.createCustomer);
-router.get('/', authMiddleware, roleMiddleware(['Gerente']), customerController.getCustomers);
-router.get('/:id', authMiddleware, roleMiddleware(['Gerente']), customerController.getCustomerById);
-router.put('/:id', authMiddleware, roleMiddleware(['Gerente']), customerController.updateCustomer);
-router.delete('/:id', authMiddleware, roleMiddleware(['Gerente']), customerController.deleteCustomer);
+
+// **Nova Rota para busca avançada - Deve vir antes das rotas com parâmetros dinâmicos**
+router.get('/advanced', getCustomersAdvanced);
+
+// Rota para criação de cliente
+router.post('/', createCustomer);
+
+// Rota para obter todos os clientes (sem paginação)
+router.get('/', getCustomers);
+
+// Rotas com parâmetros dinâmicos devem vir por último
+router.get('/:id', getCustomerById);
+router.put('/:id', updateCustomer);
+router.delete('/:id', deleteCustomer);
 
 module.exports = router;

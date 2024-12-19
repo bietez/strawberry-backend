@@ -31,10 +31,14 @@ async function authMiddleware(req, res, next) {
     }
 
     req.user = {
+      nome: user.nome,
       id: user._id,
       role: user.role,
+      manager: user.manager,
       permissions: userPermissions,
     };
+
+    console.log(req.user);
 
     next();
   } catch (err) {

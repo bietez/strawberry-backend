@@ -1,4 +1,3 @@
-// routes/ifoodRoutes.js
 const express = require('express');
 const router = express.Router();
 const ifoodAuthController = require('../controllers/ifoodAuthController');

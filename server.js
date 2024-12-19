@@ -8,7 +8,9 @@ const server = http.createServer(app);
 
 const io = socketIo(server, {
   cors: {
-    origin: '*',
+    origin: 'http://localhost:3000', // Ajuste conforme necessário
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    credentials: true,
   },
 });
 
@@ -20,6 +22,7 @@ io.on('connection', (socket) => {
     console.log('Cliente desconectado:', socket.id);
   });
 });
+
 
 global.io = io; // Disponibiliza o io globalmente
 

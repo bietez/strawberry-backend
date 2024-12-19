@@ -1,9 +1,10 @@
-// routes/integrationRoutes.js
 const express = require('express');
 const router = express.Router();
 const integrationController = require('../controllers/integrationController');
 const authMiddleware = require('../middlewares/authMiddleware');
+const roleMiddleware = require('../middlewares/roleMiddleware');
 
-router.get('/delivery-orders', authMiddleware, integrationController.fetchDeliveryOrders);
+// Rotas para integrações
+router.get('/delivery-orders', authMiddleware, roleMiddleware(['manager', 'admin']), integrationController.fetchDeliveryOrders);
 
 module.exports = router;

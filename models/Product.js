@@ -1,4 +1,5 @@
 // models/Product.js
+
 const mongoose = require('mongoose');
 const removeDiacritics = require('diacritics').remove;
 
@@ -10,11 +11,14 @@ const ProductSchema = new mongoose.Schema({
   descricao: { type: String },
   disponivel: { type: Boolean, default: true },
   quantidadeEstoque: { type: Number, default: 0 },
-});
+  imagem: { type: String, default: 'https://via.placeholder.com/150' }, // Novo campo para a URL da imagem
+}, { timestamps: true });
 
 // Middleware para definir nomeNormalizado antes de salvar
 ProductSchema.pre('validate', function (next) {
-  this.nomeNormalizado = removeDiacritics(this.nome).toLowerCase();
+  if (this.nome) {
+    this.nomeNormalizado = removeDiacritics(this.nome).toLowerCase();
+  }
   next();
 });
 

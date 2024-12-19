@@ -166,3 +166,34 @@ exports.resetPasswordWithOTP = async (req, res) => {
     res.status(500).json({ message: 'Erro ao redefinir senha', error: error.message });
   }
 };
+
+exports.updateUser = async (req, res) => {
+  const { id } = req.params;
+  const { nome, email, role, managerId, permissions, senha } = req.body;
+
+  try {
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ message: 'Usuário não encontrado.' });
+    }
+
+    // Atualizar campos permitidos
+    if (nome) user.nome = nome;
+    if (email) user.email = email;
+    if (role) user.role = role;
+    if (managerId) user.manager = managerId;
+    if (permissions) user.permissions = permissions;
+
+    // Atualizar senha se fornecida
+    if (senha) {
+      const salt = await bcrypt.genSalt(10);
+      user.senha = await bcrypt.hash(senha, salt);
+    }
+
+    await user.save();
+    res.status(200).json({ message: 'Usuário atualizado com sucesso.', user });
+  } catch (error) {
+    console.error('Erro ao atualizar usuário:', error);
+    res.status(500).json({ message: 'Erro ao atualizar usuário.', error: error.message });
+  }
+};

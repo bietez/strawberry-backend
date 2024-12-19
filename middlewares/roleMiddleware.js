@@ -1,11 +1,9 @@
-// middlewares/roleMiddleware.js
-
 function roleMiddleware(requiredRoles) {
   return (req, res, next) => {
     const user = req.user;
 
     if (!user) {
-      return res.status(401).json({ message: 'Usuário não autenticado' });
+      return res.status(401).json({ message: 'Usuário não autenticado.' });
     }
 
     const userRole = user.role || user.funcao; // Suporta 'role' ou 'funcao'

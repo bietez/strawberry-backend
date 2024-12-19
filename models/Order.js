@@ -1,18 +1,38 @@
-// models/Order.js
 const mongoose = require('mongoose');
+const AutoIncrement = require('mongoose-sequence')(mongoose);
 
-const orderSchema = new mongoose.Schema({
-  mesa: { type: mongoose.Schema.Types.ObjectId, ref: 'Table', required: true },
-  assentos: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Seat' }],
-  itens: [{
-    receita: { type: mongoose.Schema.Types.ObjectId, ref: 'Recipe', required: true },
-    quantidade: { type: Number, required: true },
-    modificacoes: String, // Ex: Sem cebola, carne ao ponto
-  }],
-  status: { type: String, enum: ['Pendente', 'Preparando', 'Pronto', 'Entregue'], default: 'Pendente' },
-  cliente: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' },
-  garcom: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true },
-  total: { type: Number, required: true },
-}, { timestamps: true });
+const OrderSchema = new mongoose.Schema(
+  {
+    orderNumber: { type: Number, unique: true }, // Campo auto-incrementado
+    mesa: { type: mongoose.Schema.Types.ObjectId, ref: 'Table' },
+    assento: { type: String },
+    itens: [
+      {
+        product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+        quantidade: { type: Number, required: true, min: 1 },
+        tipo: { type: String, enum: ['prato principal', 'entrada', 'sobremesa'], required: true, default: 'prato principal' },
+        comentarios: { type: String }, // Novo campo para comentários específicos do item
+      },
+    ],
+    cliente: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer' }, // Corrigido para 'ObjectId'
+    garcom: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // Opcional
+    total: { type: Number, required: true },
+    status: { 
+      type: String, 
+      enum: ['Pendente', 'Preparando', 'Pronto', 'Entregue', 'Finalizado'], // Adicionado 'Finalizado'
+      default: 'Pendente' 
+    },
+    tipoPedido: { 
+      type: String, 
+      enum: ['local', 'entrega'], 
+      required: true 
+    },
+    enderecoEntrega: { type: String }, // Se tipoPedido for 'entrega'
+    preparar: { type: Boolean, default: true }, // Novo campo 'preparar' por pedido
+  },
+  { timestamps: true }
+);
 
-module.exports = mongoose.model('Order', orderSchema);
+OrderSchema.plugin(AutoIncrement, { inc_field: 'orderNumber' });
+
+module.exports = mongoose.model('Order', OrderSchema);

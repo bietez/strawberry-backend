@@ -1,5 +1,3 @@
-// middlewares/permissionMiddleware.js
-
 function permissionMiddleware(requiredPermissions) {
   return (req, res, next) => {
     const userPermissions = req.user.permissions || [];

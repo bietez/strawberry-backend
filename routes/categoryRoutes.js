@@ -5,7 +5,11 @@ const categoryController = require('../controllers/categoryController');
 const authMiddleware = require('../middlewares/authMiddleware');
 const permissionMiddleware = require('../middlewares/permissionMiddleware');
 
-// Rotas para categorias
+
+router.get('/', authMiddleware, categoryController.getAllCategories);
+
+
+// Criar categoria
 router.post(
   '/',
   authMiddleware,
@@ -13,20 +17,23 @@ router.post(
   categoryController.createCategory
 );
 
+// Buscar categorias avançadas com paginação, pesquisa e ordenação
 router.get(
-  '/',
+  '/advanced',
   authMiddleware,
   permissionMiddleware(['viewCategory']),
   categoryController.getCategories
 );
 
+// Obter categoria por ID
 router.get(
   '/:categoryId',
   authMiddleware,
   permissionMiddleware(['viewCategory']),
-  categoryController.getCategories
+  categoryController.getCategoryById
 );
 
+// Atualizar categoria
 router.put(
   '/:categoryId',
   authMiddleware,
@@ -34,6 +41,7 @@ router.put(
   categoryController.updateCategory
 );
 
+// Deletar categoria
 router.delete(
   '/:categoryId',
   authMiddleware,

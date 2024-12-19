@@ -123,3 +123,57 @@ exports.deleteCustomer = async (req, res) => {
     res.status(400).json({ message: 'Erro ao excluir cliente', error: error.message });
   }
 };
+
+// ========================= NOVO MÉTODO =========================
+
+/**
+ * Método avançado para obter clientes com paginação, pesquisa e ordenação.
+ * Endpoint: GET /customers/advanced
+ */
+exports.getCustomersAdvanced = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      search = '',
+      sort = 'nome',
+      order = 'asc',
+    } = req.query;
+
+    const pageNumber = parseInt(page, 10) || 1;
+    const limitNumber = parseInt(limit, 10) || 20;
+
+    // Cria o filtro de pesquisa
+    const query = search
+      ? {
+          $or: [
+            { nome: { $regex: search, $options: 'i' } },
+            { email: { $regex: search, $options: 'i' } },
+            { cidade: { $regex: search, $options: 'i' } },
+            { cpfCnpj: { $regex: search, $options: 'i' } },
+          ],
+        }
+      : {};
+
+    // Conta o total de clientes correspondentes ao filtro
+    const totalCustomers = await Customer.countDocuments(query);
+
+    // Calcula o total de páginas
+    const totalPages = Math.ceil(totalCustomers / limitNumber);
+
+    // Configurações de ordenação
+    const sortOption = { [sort]: order === 'asc' ? 1 : -1 };
+
+    // Busca os clientes com paginação e ordenação
+    const customers = await Customer.find(query)
+      .populate('historicoPedidos') // Remova se não estiver usando
+      .sort(sortOption)
+      .skip((pageNumber - 1) * limitNumber)
+      .limit(limitNumber);
+
+    res.json({ customers, totalPages });
+  } catch (error) {
+    console.error('Erro ao obter clientes (avançado):', error);
+    res.status(400).json({ message: 'Erro ao obter clientes', error: error.message });
+  }
+};

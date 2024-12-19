@@ -1,9 +1,27 @@
 // routes/productRoutes.js
+
 const express = require('express');
 const router = express.Router();
 const productController = require('../controllers/productController');
 const authMiddleware = require('../middlewares/authMiddleware');
 const permissionMiddleware = require('../middlewares/permissionMiddleware');
+
+// **Nova Rota para Verificar Duplicidade de Nome**
+// Esta rota deve ser adicionada antes das rotas dinâmicas para evitar conflitos.
+router.get(
+  '/check-nome/:nome',
+  authMiddleware,
+  permissionMiddleware(['viewProduct']), // Ajuste as permissões conforme necessário
+  productController.checkNomeDuplicado
+);
+
+// **Nova Rota para Busca Avançada - Deve Vir Antes das Rotas Dinâmicas**
+router.get(
+  '/advanced',
+  authMiddleware,
+  permissionMiddleware(['viewProduct']),
+  productController.getProductsAdvanced
+);
 
 // Criar produto - requer a permissão 'createProduct'
 router.post(
@@ -13,7 +31,7 @@ router.post(
   productController.createProduct
 );
 
-// Obter produtos - requer a permissão 'viewProduct'
+// Obter todos os produtos - requer a permissão 'viewProduct'
 router.get(
   '/',
   authMiddleware,
@@ -21,6 +39,7 @@ router.get(
   productController.getProducts
 );
 
+// Obter produto por ID - requer a permissão 'viewProduct'
 router.get(
   '/:productId',
   authMiddleware,
@@ -41,7 +60,7 @@ router.delete(
   '/:productId',
   authMiddleware,
   permissionMiddleware(['deleteProduct']),
-  productController.deleteProduct // Certifique-se de que esta função está definida
+  productController.deleteProduct
 );
 
 module.exports = router;

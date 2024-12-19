@@ -1,0 +1,8 @@
+PORT=8000
+MONGO_URI=mongodb://admin:password@localhost:27017/cash_register?authSource=admin
+JWT_SECRET=1234
+PAYMENT_API_KEY=sua_chave_api_de_pagamento
+IFOOD_CLIENT_ID=9fd0df72-3b06-4b9a-8b10-112f670627cb
+IFOOD_CLIENT_SECRET=bcvuwmmj13o8vqfo6zg2395hsi6bkdmt0jguht0ccijtb5rkqunuzsv54wgjgs9ioih6wlnlobf02xtxstsjdouuw5azssemkrh
+EMAIL_USER=loremipsum@gmail.com
+EMAIL_PASS=12345

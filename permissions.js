@@ -46,6 +46,9 @@ const allPermissions = [
     'manageSalesGoals',
     'viewTeamMembers',
     'manageOrder',
+    'configSystem',
+    'viewOrder',
+    'viewOrders'
     
   // Adicione todas as outras permissões aqui
 ];

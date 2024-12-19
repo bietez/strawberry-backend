@@ -1,36 +1,45 @@
-// middlewares/auditMiddleware.js
-const AuditLog = require('../models/AuditLog');
+const jwt = require('jsonwebtoken');
+const config = require('../config');
+const User = require('../models/User');
+const allPermissions = require("../permissions"); // Certifique-se de que este arquivo existe e está correto
 
-function auditMiddleware(action) {
-  return async (req, res, next) => {
-    const user = req.user || {};
-    const userId = user.id || 'Anônimo';
-    const userEmail = user.email || 'Desconhecido';
+async function authMiddleware(req, res, next) {
+  const authHeader = req.headers['authorization'];
 
-    // Capturar detalhes relevantes
-    const details = {
-      method: req.method,
-      path: req.originalUrl,
-      body: req.body,
-      params: req.params,
-      query: req.query,
-      ip: req.ip,
-    };
+  if (!authHeader)
+    return res.status(401).json({ message: 'Acesso negado. Token não fornecido.' });
 
-    // Criar registro de auditoria
-    try {
-      await AuditLog.create({
-        userId: userId,
-        userEmail: userEmail,
-        action: action,
-        details: details,
-      });
-    } catch (error) {
-      console.error('Erro ao salvar registro de auditoria:', error);
+  const token = authHeader.split(' ')[1]; // Extrai o token após 'Bearer '
+
+  if (!token)
+    return res.status(401).json({ message: 'Acesso negado. Token não fornecido.' });
+
+  try {
+    const decoded = jwt.verify(token, config.jwtSecret);
+    const user = await User.findById(decoded.id);
+
+    if (!user)
+      return res.status(401).json({ message: 'Usuário não encontrado.' });
+
+    // Preparar as permissões do usuário
+    let userPermissions = user.permissions;
+
+    // Se a função for admin, atribuir todas as permissões ao usuário
+    if (user.role === 'admin') {
+      userPermissions = allPermissions;
     }
 
+    req.user = {
+      id: user._id,
+      role: user.role,
+      permissions: userPermissions,
+    };
+
     next();
-  };
+  } catch (err) {
+    console.error('Erro na verificação do token:', err);
+    res.status(400).json({ message: 'Token inválido.' });
+  }
 }
 
-module.exports = auditMiddleware;
+module.exports = authMiddleware;

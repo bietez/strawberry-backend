@@ -1,10 +1,9 @@
-// models/User.js
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 
 const UserSchema = new mongoose.Schema({
   nome: { type: String, required: true },
-  email: { type: String, required: true, unique: true },
+  email: { type: String, required: true, unique: true, match: /.+\@.+\..+/ },
   senha: { type: String, required: true },
   role: {
     type: String,
@@ -15,18 +14,23 @@ const UserSchema = new mongoose.Schema({
   permissions: { type: [String], default: [] }, // Lista de permissões
   resetPasswordOTP: { type: String },
   resetPasswordExpires: { type: Date },
-});
+}, { timestamps: true });
 
 // Hash da senha antes de salvar
 UserSchema.pre('save', async function (next) {
   if (!this.isModified('senha')) return next();
-  this.senha = await bcrypt.hash(this.senha, 10);
-  next();
+  try {
+    const salt = await bcrypt.genSalt(10);
+    this.senha = await bcrypt.hash(this.senha, salt);
+    next();
+  } catch (error) {
+    next(error);
+  }
 });
 
 // Método para comparar senhas
-UserSchema.methods.comparePassword = function (senha) {
-  return bcrypt.compare(senha, this.senha);
+UserSchema.methods.comparePassword = async function (senha) {
+  return await bcrypt.compare(senha, this.senha);
 };
 
 module.exports = mongoose.model('User', UserSchema);

@@ -1,0 +1,8 @@
+})
+  ]
+    { _id: 2, host: "cash-register-banco3:27017" }
+    { _id: 1, host: "cash-register-banco2:27017" },
+    { _id: 0, host: "cash-register-banco1:27017" },
+  members: [
+  _id: "rs0",
+rs.initiate({

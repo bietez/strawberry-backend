@@ -1,4 +1,3 @@
-// controllers/paymentController.js
 const Payment = require('../models/Payment');
 const Order = require('../models/Order');
 
@@ -25,8 +24,8 @@ exports.processPayment = async (req, res) => {
 
     await payment.save();
 
-    // Atualizar status do pedido para "Pago"
-    order.status = 'Pago';
+    // Atualizar status do pedido para "Entregue"
+    order.status = 'Entregue';
     await order.save();
 
     // Emissão da NFC-e (Implementar conforme a integração com serviços de emissão)
