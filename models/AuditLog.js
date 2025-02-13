@@ -5,7 +5,7 @@ const AuditLogSchema = new mongoose.Schema({
   userEmail: { type: String }, // Para facilitar consultas
   action: { type: String, required: true },
   details: { type: Object }, // Pode armazenar detalhes adicionais sobre a ação
-  timestamp: { type: Date, default: Date.now, index: true },
+  timestamp: { type: Date, default: Date.now }, // Removido 'index: true'
 });
 
 // Criar índice TTL no campo 'timestamp' para expirar documentos após 60 dias

@@ -10,16 +10,13 @@ const permissionMiddleware = require('../middlewares/permissionMiddleware');
 // Esta rota deve ser adicionada antes das rotas dinâmicas para evitar conflitos.
 router.get(
   '/check-nome/:nome',
-  authMiddleware,
-  permissionMiddleware(['viewProduct']), // Ajuste as permissões conforme necessário
+  
   productController.checkNomeDuplicado
 );
 
 // **Nova Rota para Busca Avançada - Deve Vir Antes das Rotas Dinâmicas**
 router.get(
   '/advanced',
-  authMiddleware,
-  permissionMiddleware(['viewProduct']),
   productController.getProductsAdvanced
 );
 
@@ -27,23 +24,19 @@ router.get(
 router.post(
   '/',
   authMiddleware,
-  permissionMiddleware(['createProduct']),
   productController.createProduct
 );
 
+
 // Obter todos os produtos - requer a permissão 'viewProduct'
 router.get(
-  '/',
-  authMiddleware,
-  permissionMiddleware(['viewProduct']),
+  '/',  
   productController.getProducts
 );
 
 // Obter produto por ID - requer a permissão 'viewProduct'
 router.get(
   '/:productId',
-  authMiddleware,
-  permissionMiddleware(['viewProduct']),
   productController.getProductById
 );
 
@@ -51,7 +44,6 @@ router.get(
 router.put(
   '/:productId',
   authMiddleware,
-  permissionMiddleware(['editProduct']),
   productController.updateProduct
 );
 
@@ -59,7 +51,6 @@ router.put(
 router.delete(
   '/:productId',
   authMiddleware,
-  permissionMiddleware(['deleteProduct']),
   productController.deleteProduct
 );
 

@@ -1,5 +1,7 @@
 // routes/customerRoutes.js
 const express = require('express');
+const authMiddleware = require('../middlewares/authMiddleware');
+
 const router = express.Router();
 const {
   createCustomer,
@@ -12,17 +14,17 @@ const {
 
 
 // **Nova Rota para busca avançada - Deve vir antes das rotas com parâmetros dinâmicos**
-router.get('/advanced', getCustomersAdvanced);
+router.get('/advanced', authMiddleware, getCustomersAdvanced);
 
 // Rota para criação de cliente
-router.post('/', createCustomer);
+router.post('/', authMiddleware, createCustomer);
 
 // Rota para obter todos os clientes (sem paginação)
-router.get('/', getCustomers);
+router.get('/', authMiddleware, getCustomers);
 
 // Rotas com parâmetros dinâmicos devem vir por último
-router.get('/:id', getCustomerById);
-router.put('/:id', updateCustomer);
-router.delete('/:id', deleteCustomer);
+router.get('/:id', authMiddleware, getCustomerById);
+router.put('/:id', authMiddleware, updateCustomer);
+router.delete('/:id', authMiddleware, deleteCustomer);
 
 module.exports = router;

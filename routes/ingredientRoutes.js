@@ -39,7 +39,6 @@ const upload = multer({
 router.post(
   '/',
   authMiddleware,
-  roleMiddleware(['manager']),
   upload.single('imagem'), // Middleware de upload para campo 'imagem'
   ingredientController.createIngredient
 );
@@ -47,21 +46,18 @@ router.post(
 router.get(
   '/',
   authMiddleware,
-  roleMiddleware(['manager', 'agent']),
   ingredientController.getIngredients
 );
 
 router.get(
   '/:id',
   authMiddleware,
-  roleMiddleware(['manager', 'agent']),
   ingredientController.getIngredientById
 );
 
 router.put(
   '/:id',
   authMiddleware,
-  roleMiddleware(['manager']),
   upload.single('imagem'), // Middleware de upload para campo 'imagem'
   ingredientController.updateIngredient
 );
@@ -69,7 +65,6 @@ router.put(
 router.delete(
   '/:id',
   authMiddleware,
-  roleMiddleware(['manager']),
   ingredientController.deleteIngredient
 );
 

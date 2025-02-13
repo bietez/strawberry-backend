@@ -1,106 +1,272 @@
-const User = require('../models/User');
-const mongoose = require('mongoose');
+// backend/controllers/userController.js
+
+const User = require('../models/User'); 
 const bcrypt = require('bcrypt');
-const allPermissions = require('../permissions')
+const allPermissions = require('../permissions');
 
+// Função para criar usuário
+// Função para criar usuário
+exports.createUser = async (req, res) => {
+  console.log('createUser: Requisição recebida', {
+    headers: req.headers,
+    params: req.params,
+    query: req.query,
+    body: req.body,
+  });
 
-exports.updateUser = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { nome, email, role, permissions, managerId, senha } = req.body;
+    const {
+      nome,
+      email,
+      role,
+      permissions,
+      managerId,
+      senha,
+      telefone,
+      imagem,
+      vacancy,
+      contractType,
+      hiredSince, // <-- Novo campo
+    } = req.body;
 
-    // Buscar o usuário que se deseja atualizar
-    const userToUpdate = await User.findById(id);
-    if (!userToUpdate) {
-      return res.status(404).json({ message: 'Usuário não encontrado' });
+    // Verifique se o nome ou email já existem
+    const existingUser = await User.findOne({ $or: [{ nome }, { email }] });
+    if (existingUser) {
+      return res.status(400).json({ message: 'Nome ou Email já está em uso.' });
     }
 
-    // Verificar permissões de quem está logado (req.user)
-    if (req.user.role !== 'admin') {
-      // Se não for admin
-      if (req.user.role === 'manager') {
-        // Manager só pode atualizar seus agentes
-        // Verificar se o userToUpdate é agent e se manager dele é o req.user
-        if (userToUpdate.role !== 'agent' || String(userToUpdate.manager) !== String(req.user.id)) {
-          return res.status(403).json({ message: 'Acesso negado' });
-        }
-      } else {
-        // Se não é admin nem manager, não pode atualizar
-        return res.status(403).json({ message: 'Acesso negado' });
-      }
-    }
+    // Crie o usuário
+    const newUser = new User({
+      nome,
+      email,
+      role,
+      permissions,
+      manager: managerId || null,
+      senha, // Será hasheada pelo middleware
+      telefone,
+      imagem,
+      vacancy,
+      contractType,
+      hiredSince: hiredSince || null, // Se vier vazio, fica null
+    });
 
-    // Filtrar permissões para incluir apenas as válidas
-    let filteredPermissions = [];
-    if (Array.isArray(permissions)) {
-      filteredPermissions = permissions.filter((perm) => allPermissions.includes(perm));
-    }
+    await newUser.save();
 
-    // Montar objeto de atualização
+    return res.status(201).json({ message: 'Usuário criado com sucesso.', user: newUser });
+  } catch (error) {
+    console.error('Erro ao criar usuário:', error);
+    return res.status(500).json({ message: 'Erro interno no servidor.' });
+  }
+};
+
+
+// Função para atualizar usuário
+exports.updateUser = async (req, res) => {
+  console.log('updateUser: Requisição recebida', {
+    headers: req.headers,
+    params: req.params,
+    query: req.query,
+    body: req.body,
+  });
+
+  const { id } = req.params;
+  const {
+    nome,
+    email,
+    role,
+    permissions,
+    managerId,
+    senha,
+    telefone,
+    imagem,
+    vacancy,
+    contractType,
+    hiredSince, // <-- Novo campo
+  } = req.body;
+
+  try {
+    // Preparar os dados a serem atualizados
     const updateData = {
       nome,
       email,
       role,
-      permissions: filteredPermissions
+      permissions,
+      telefone,
+      contractType,
     };
 
-    // Se for agent, managerId é obrigatório
-    if (role === 'agent') {
-      if (!managerId) {
-        return res.status(400).json({ message: 'managerId é obrigatório para agentes' });
-      }
+    // Atualiza campos somente se vierem da requisição
+    if (imagem) {
+      updateData.imagem = imagem;
+    }
+    if (vacancy) {
+      updateData.vacancy = vacancy;
+    }
+    if (managerId) {
       updateData.manager = managerId;
     } else {
-      // Caso contrário, remove o campo manager
-      updateData.manager = undefined;
+      updateData.manager = null;
+    }
+    if (hiredSince) {
+      updateData.hiredSince = hiredSince;
     }
 
-    // Se senha for enviada, atualizar a senha
+    // Caso senha venha preenchida
     if (senha && senha.trim() !== '') {
-      const hashedPassword = await bcrypt.hash(senha, 10);
+      const saltRounds = 10;
+      const hashedPassword = await bcrypt.hash(senha, saltRounds);
       updateData.senha = hashedPassword;
     }
 
-    const updatedUser = await User.findByIdAndUpdate(id, updateData, {
-      new: true,
-      runValidators: true,
-    });
+    // Atualizar o usuário no banco de dados
+    const updatedUser = await User.findByIdAndUpdate(id, updateData, { new: true }).exec();
 
     if (!updatedUser) {
-      return res.status(404).json({ message: 'Usuário não encontrado após atualização' });
+      return res.status(404).json({ message: 'Usuário não encontrado.' });
     }
 
-    res.json({ message: 'Usuário atualizado com sucesso', user: updatedUser });
+    res.json({ message: 'Usuário atualizado com sucesso.', user: updatedUser });
   } catch (error) {
     console.error('Erro ao atualizar usuário:', error);
-    res.status(500).json({ message: 'Erro ao atualizar membro da equipe', error: error.message });
+    res.status(500).json({ message: 'Erro interno do servidor ao atualizar usuário.' });
   }
 };
 
+
+// Função para verificar duplicidade do nome
+exports.checkNomeDuplicado = async (req, res) => {
+  try {
+    const { nome } = req.params;
+
+    const existingUser = await User.findOne({ nome });
+
+    if (existingUser) {
+      return res.json({ exists: true, userId: existingUser._id });
+    } else {
+      return res.json({ exists: false });
+    }
+  } catch (error) {
+    console.error('Erro ao verificar duplicidade do nome:', error);
+    return res.status(500).json({ message: 'Erro interno no servidor.' });
+  }
+};
+
+// Função para obter membros da equipe
+exports.getTeamMembers = async (req, res) => {
+  try {
+    // Supondo que somente admin ou manager podem listar
+    if (req.user.role !== 'admin' && req.user.role !== 'manager') {
+      return res.status(403).json({ message: 'Acesso negado' });
+    }
+
+    let teamMembers;
+    if (req.user.role === 'admin') {
+      // Admin pode ver todos os cargos que você desejar
+      // Exemplo: Todos exceto admin
+      teamMembers = await User.find({
+        role: {
+          $in: [
+            'agent',
+            'manager',
+            'chef',
+            'waiter',
+            'receptionist',
+            'deliveryMan',
+            'kitchenAssistant',
+            'barman',
+            'cleaning',
+            'feeder',
+          ],
+        },
+      })
+        .populate('manager', 'nome email role');
+    } else {
+      // Se for manager, pode ver apenas seus agentes
+      teamMembers = await User.find({
+        manager: req.user.id,
+        role: 'agent',
+      }).populate('manager', 'nome email role');
+    }
+
+    res.json(teamMembers);
+  } catch (error) {
+    console.error('Erro ao obter membros da equipe:', error);
+    res.status(500).json({
+      message: 'Erro ao obter membros da equipe',
+      error: error.message,
+    });
+  }
+};
+
+// Função para obter dados do usuário logado
 exports.getMe = async (req, res) => {
   try {
     // Supondo que o req.user foi definido pelo authMiddleware com { id: ..., role: ..., permissions: ... }
     const userId = req.user.id;
-    const user = await User.findById(userId).select({ nome: 1, email: 1, role: 1, permissions: 1 });
+    // Inclua quaisquer campos adicionais que queira retornar
+    const user = await User.findById(userId).select({
+      nome: 1,
+      email: 1,
+      role: 1,
+      permissions: 1,
+      vacancy: 1,
+      contractType: 1,
+      imagem: 1,
+    });
 
     if (!user) {
-      return res.status(404).json({ message: 'Usuário não encontrado' });
+      return res.status(404).json({ message: 'Usuário não encontrado.' });
     }
 
     res.json(user);
   } catch (error) {
     console.error('Erro ao obter usuário logado:', error);
-    res.status(500).json({ message: 'Erro ao obter usuário logado', error: error.message });
+    res.status(500).json({
+      message: 'Erro ao obter usuário logado',
+      error: error.message,
+    });
   }
 };
 
+exports.checkNomeDuplicado = async (req, res) => {
+  const { nome } = req.params;
+
+  if (!nome) {
+    return res.status(400).json({ message: 'Nome é obrigatório.' });
+  }
+
+  try {
+    // Busca insensível a maiúsculas/minúsculas
+    const user = await User.findOne({ nome: { $regex: new RegExp(`^${nome.trim()}$`, 'i') } }).exec();
+
+    if (user) {
+      res.json({
+        exists: true,
+        userId: user._id.toString(),
+      });
+    } else {
+      res.json({
+        exists: false,
+        userId: null,
+      });
+    }
+  } catch (error) {
+    console.error('Erro ao verificar duplicidade do nome:', error);
+    res.status(500).json({
+      message: 'Erro interno do servidor ao verificar o nome.',
+    });
+  }
+};
+// Função para obter usuário por ID
 exports.getUserById = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    // Valide o ID se necessário
-    const user = await User.findById(id).select('-password'); // Exclui a senha se existir
 
+    // Valide o ID se necessário
+    // Exemplo: if (!mongoose.Types.ObjectId.isValid(id)) ...
+
+    // Exclui o campo `senha` e qualquer outro campo sensível
+    const user = await User.findById(id).select('-senha');
     if (!user) {
       return res.status(404).json({ message: 'Usuário não encontrado.' });
     }
@@ -109,28 +275,5 @@ exports.getUserById = async (req, res) => {
   } catch (error) {
     console.error('Erro ao obter usuário:', error);
     return res.status(500).json({ message: 'Erro ao obter usuário.' });
-  }
-};
-
-exports.getTeamMembers = async (req, res) => {
-  try {
-    if (req.user.role !== 'admin' && req.user.role !== 'manager') {
-      return res.status(403).json({ message: 'Acesso negado' });
-    }
-
-    let teamMembers;
-    if (req.user.role === 'admin') {
-      // Admin pode ver todos os agentes e gerentes
-      teamMembers = await User.find({ role: { $in: ['agent', 'manager'] } })
-        .populate('manager', 'nome email role');
-    } else {
-      // Manager vê apenas seus agentes
-      teamMembers = await User.find({ manager: req.user.id, role: 'agent' })
-        .populate('manager', 'nome email role');
-    }
-
-    res.json(teamMembers);
-  } catch (error) {
-    res.status(500).json({ message: 'Erro ao obter membros da equipe', error: error.message });
   }
 };

@@ -4,7 +4,7 @@ const Ingredient = require('../models/Ingredient');
 exports.createIngredient = async (req, res) => {
   try {
     const { nome, unidadeMedida, quantidadeEstoque, precoCusto } = req.body;
-    let imagem = 'https://via.placeholder.com/150'; // URL padrão
+    let imagem = 'https://placehold.co/150'; // URL padrão
 
     if (req.file) {
       const imageUrl = `${req.protocol}://${req.get('host')}/images/${req.file.filename}`;

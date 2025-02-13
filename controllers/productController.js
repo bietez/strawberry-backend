@@ -59,10 +59,17 @@ exports.checkNomeDuplicado = async (req, res) => {
 // Obter todos os produtos - requer a permissão 'viewProduct'
 exports.getProducts = async (req, res) => {
   try {
-    const products = await Product.find().populate('categoria');
+    // Ordenar por quantidadeEstoque em ordem crescente (1)
+    const products = await Product.find()
+      .populate('categoria')
+      .sort({ quantidadeEstoque: 1 }); 
+
     res.json(products);
   } catch (error) {
-    res.status(400).json({ message: 'Erro ao obter produtos', error: error.message });
+    res.status(400).json({
+      message: 'Erro ao obter produtos',
+      error: error.message,
+    });
   }
 };
 

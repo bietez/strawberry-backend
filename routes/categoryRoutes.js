@@ -13,7 +13,6 @@ router.get('/', authMiddleware, categoryController.getAllCategories);
 router.post(
   '/',
   authMiddleware,
-  permissionMiddleware(['createCategory']),
   categoryController.createCategory
 );
 
@@ -21,7 +20,6 @@ router.post(
 router.get(
   '/advanced',
   authMiddleware,
-  permissionMiddleware(['viewCategory']),
   categoryController.getCategories
 );
 
@@ -29,7 +27,6 @@ router.get(
 router.get(
   '/:categoryId',
   authMiddleware,
-  permissionMiddleware(['viewCategory']),
   categoryController.getCategoryById
 );
 
@@ -37,7 +34,6 @@ router.get(
 router.put(
   '/:categoryId',
   authMiddleware,
-  permissionMiddleware(['editCategory']),
   categoryController.updateCategory
 );
 
@@ -45,7 +41,6 @@ router.put(
 router.delete(
   '/:categoryId',
   authMiddleware,
-  permissionMiddleware(['deleteCategory']),
   categoryController.deleteCategory
 );
 

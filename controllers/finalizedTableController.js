@@ -5,125 +5,416 @@ const mongoose = require('mongoose');
 const Table = require('../models/Table');
 const Comanda = require('../models/Comanda');
 const { createInvoice } = require('../utils/pdfUtil');
+const Config = require('../models/Config');
+const pdfUtil = require('../utils/pdfUtil');
+const Product = require('../models/Product');
+const Lancamento = require('../models/Lancamento');
+const Categoria = require('../models/Categoria');
+const Ambiente = require('../models/Ambiente'); 
+
+
+exports.finalizarEntrega = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const {
+      formaPagamento,
+      valorPago,
+      tipoDesconto,
+      valorDesconto,
+      cobrarTaxaServico,
+      valorTaxaServico
+    } = req.body;
+
+    // 1) Buscar pedido do tipo 'entrega'
+    const pedido = await Order.findOne({
+      _id: orderId,
+      tipoPedido: 'entrega',
+      status: { $ne: 'Finalizado' },
+    }).populate('itens.product');
+
+    if (!pedido) {
+      return res.status(404).json({
+        message: 'Pedido de entrega não encontrado ou já finalizado.'
+      });
+    }
+
+    // 2) Calcular total
+    const totalPedido = pedido.total || 0;
+
+    // 3) Calcular desconto e taxa
+    let descontoCalculado = 0;
+    if (tipoDesconto === 'porcentagem') {
+      descontoCalculado = (valorDesconto / 100) * totalPedido;
+    } else if (tipoDesconto === 'valor') {
+      descontoCalculado = valorDesconto;
+    }
+    if (descontoCalculado < 0) descontoCalculado = 0;
+
+    let totalFinal = totalPedido - descontoCalculado;
+    let taxaServicoValor = 0;
+    if (cobrarTaxaServico) {
+      taxaServicoValor = parseFloat(valorTaxaServico) || 0;
+      totalFinal += taxaServicoValor;
+    }
+
+    if (valorPago < totalFinal) {
+      return res.status(400).json({
+        message: 'Valor pago é insuficiente.'
+      });
+    }
+
+    // 4) Buscar ou criar um Ambiente = "Entrega"
+    let ambienteEntrega = await Ambiente.findOne({ nome: 'Entrega' });
+    if (!ambienteEntrega) {
+      ambienteEntrega = await Ambiente.create({ nome: 'Entrega', status: 'ativo' });
+    }
+
+    // 5) Criar doc FinalizedTable
+    // Aqui definimos numeroMesa = 9999 (um valor simbólico)
+    const finalized = new FinalizedTable({
+      numeroMesa: 9999,
+      ambienteId: ambienteEntrega._id,
+      garcomId: req.user ? req.user._id : null, // se quiser associar ao usuário logado
+      pedidos: [pedido._id],
+      valorTotal: totalFinal,
+      formaPagamento,
+      valorPago,
+      tipoDesconto,
+      valorDesconto: descontoCalculado,
+      valorTaxaServico: taxaServicoValor,
+      cobrarTaxaServico: !!cobrarTaxaServico,
+      dataFinalizacao: new Date()
+    });
+
+    await finalized.save();
+
+    // 6) Marcar pedido como Finalizado
+    pedido.status = 'Finalizado';
+    await pedido.save();
+
+    return res.json({
+      message: 'Entrega finalizada com sucesso.',
+      finalized
+    });
+  } catch (error) {
+    console.error('Erro ao finalizar entrega:', error);
+    return res.status(500).json({
+      message: 'Erro ao finalizar entrega',
+      error: error.message
+    });
+  }
+};
+
+exports.updateFinalizedTable = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { garcomId } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      console.log('ID inválido:', id);
+      return res.status(400).json({ message: 'ID inválido.' });
+    }
+
+    console.log(`Buscando FinalizedTable com _id = ${id}...`);
+    let finalized = await FinalizedTable.findById(id);
+    if (!finalized) {
+      console.log(`Comanda finalizada não encontrada para o ID: ${id}`);
+      return res.status(404).json({ message: 'Comanda finalizada não encontrada.' });
+    }
+
+    console.log('FinalizedTable antes da atualização:', finalized);
+
+    if (garcomId) {
+      console.log('Atualizando garcomId para:', garcomId);
+      finalized.garcomId = garcomId;
+    } else {
+      console.log('Nenhum garcomId fornecido no body, não atualizando esse campo.');
+    }
+
+    console.log('Salvando alterações...');
+    await finalized.save();
+
+    console.log('Realizando populate com Product...');
+    const populated = await FinalizedTable.findById(finalized._id)
+      .populate('ambienteId', 'nome')
+      .populate('garcomId', 'nome')
+      .populate({
+        path: 'pedidos',
+        populate: {
+          path: 'itens.product',
+          model: 'Product',
+        },
+      });
+
+    console.log('FinalizedTable após populate:', JSON.stringify(populated, null, 2));
+
+    console.log('Enviando resposta ao cliente...');
+    return res.json({
+      message: 'Comanda finalizada atualizada com sucesso.',
+      finalized: populated,
+    });
+  } catch (error) {
+    console.error('Erro ao atualizar comanda finalizada:', error);
+    return res.status(500).json({
+      message: 'Erro ao atualizar comanda finalizada.',
+      error: error.message,
+    });
+  }
+};
 
 exports.finalizarMesa = async (req, res) => {
   try {
     const tableId = req.params.id;
-    const { formaPagamento, valorPago, tipoDesconto, valorDesconto } = req.body;
+    const {
+      formaPagamento,
+      valorPago,
+      tipoDesconto,
+      valorDesconto,
+      cobrarTaxaServico,
+      valorTaxaServico,
+    } = req.body;
 
-    // Validações básicas
-    if (!formaPagamento || valorPago === undefined || tipoDesconto === undefined || valorDesconto === undefined) {
+    console.log('Dados Recebidos na Finalização da Mesa:', {
+      formaPagamento,
+      valorPago,
+      tipoDesconto,
+      valorDesconto,
+      cobrarTaxaServico,
+      valorTaxaServico,
+    });
+
+    if (!formaPagamento || valorPago === undefined || !tipoDesconto || valorDesconto === undefined) {
       return res.status(400).json({ message: 'Dados de pagamento incompletos.' });
     }
 
-    // Encontrar a mesa
-    const mesa = await Table.findById(tableId).populate('ambiente');
+    // 1) Buscar a mesa
+    const mesa = await Table.findById(tableId).populate('ambiente').populate('garcomId', 'nome');
     if (!mesa) {
       return res.status(404).json({ message: 'Mesa não encontrada.' });
     }
-
     if (mesa.status !== 'ocupada') {
       return res.status(400).json({ message: 'Mesa não está ocupada.' });
     }
 
-    // Obter todos os pedidos da mesa que não estão finalizados
+    // 2) Define garcomId a partir do user autenticado
+    const garcomId = req.user._id;
+    mesa.garcomId = garcomId;
+    await mesa.save();
+
+    // 3) Buscar pedidos
     const pedidos = await Order.find({ mesa: tableId, status: { $ne: 'Finalizado' } })
       .populate('itens.product')
-      .populate('garcom')
-      .populate('cliente');
+      .populate('garcom', 'nome');
 
     if (pedidos.length === 0) {
       return res.status(400).json({ message: 'Não há pedidos para esta mesa.' });
     }
 
-    // Calcular o total dos pedidos
+    // 4) Calcular total
     let total = 0;
-    pedidos.forEach(order => {
-      total += order.total;
+    pedidos.forEach((ord) => {
+      total += ord.total || 0;
     });
 
-    // Calcular desconto
-    let desconto = 0;
+    // 5) Calcular desconto e taxa de serviço
+    let descontoCalculado = 0;
     if (tipoDesconto === 'porcentagem') {
-      desconto = (valorDesconto / 100) * total;
+      descontoCalculado = (valorDesconto / 100) * total;
     } else if (tipoDesconto === 'valor') {
-      desconto = valorDesconto;
+      descontoCalculado = valorDesconto;
+    }
+    if (descontoCalculado < 0) descontoCalculado = 0;
+
+    let totalFinal = total - descontoCalculado;
+
+    let taxaServicoValor = 0;
+    if (cobrarTaxaServico) {
+      taxaServicoValor = parseFloat(valorTaxaServico) || 0;
+      totalFinal += taxaServicoValor;
     }
 
-    const totalFinal = total - desconto;
+    console.log('Total Final após Desconto e Taxa de Serviço:', totalFinal);
 
-    // Verificar se o valor pago é suficiente
     if (valorPago < totalFinal) {
       return res.status(400).json({ message: 'Valor pago é insuficiente.' });
     }
 
-    // Criar a comanda
-    const comanda = new Comanda({
-      mesa: tableId,
-      orders: pedidos.map(order => order._id),
+    // 6) Criar doc FinalizedTable
+    const finalized = new FinalizedTable({
+      numeroMesa: mesa.numeroMesa,
+      ambienteId: mesa.ambiente?._id,
+      garcomId: mesa.garcomId,
+      pedidos: pedidos.map((ord) => ord._id),
+      valorTotal: totalFinal,
       formaPagamento,
       valorPago,
       tipoDesconto,
-      valorDesconto: desconto,
-      total: totalFinal,
-      status: 'Finalizada',
+      valorDesconto: descontoCalculado,
+      valorTaxaServico: taxaServicoValor,
+      cobrarTaxaServico: !!cobrarTaxaServico,
+      dataFinalizacao: new Date(),
     });
+    await finalized.save();
 
-    await comanda.save();
+    // 7) Atualiza pedidos -> Finalizado
+    await Order.updateMany(
+      { mesa: tableId, status: { $ne: 'Finalizado' } },
+      { status: 'Finalizado' }
+    );
 
-    // Atualizar o status dos pedidos para 'Finalizado'
-    await Order.updateMany({ mesa: tableId, status: { $ne: 'Finalizado' } }, { status: 'Finalizado' });
-
-    // Atualizar o status da mesa para 'livre'
+    // 8) Mesa vira 'livre'
     mesa.status = 'livre';
     await mesa.save();
 
-    // Emitir evento via Socket.io, se necessário
-    if (global.io) {
-      global.io.emit('mesa_finalizada', { mesaId, comanda });
+    // 9) Gerar PDF Invoice
+    const comanda = {
+      mesa: mesa,
+      garcomId: garcomId,
+      pedidos: pedidos,
+      formaPagamento,
+      valorPago,
+      tipoDesconto,
+      valorDesconto: descontoCalculado,
+      valorTaxaServico: taxaServicoValor,
+      cobrarTaxaServico,
+      dataFinalizacao: finalized.dataFinalizacao,
+    };
+
+    const pdfPath = await pdfUtil.createInvoice(comanda);
+    finalized.pdfPath = pdfPath;
+    await finalized.save();
+
+    // 10) --- CRIA O LANÇAMENTO-SUMÁRIO EM "Mesas Finalizadas" ---
+    let catMesas = await Categoria.findOne({ nome: 'Mesas Finalizadas', tipo: 'Receita' });
+    if (!catMesas) {
+      catMesas = await Categoria.create({ nome: 'Mesas Finalizadas', tipo: 'Receita' });
+    }
+    const novoLanc = new Lancamento({
+      tipo: 'Receita',
+      clienteFornecedor: mesa?.garcomId?.nome || `Mesa #${mesa.numeroMesa}`,
+      descricao: `Finalized table #${finalized._id}`,
+      categoria: catMesas._id,
+      data: new Date(),
+      valor: totalFinal,
+      status: 'pago',
+      importId: finalized._id,
+      importSource: 'finalized-tables',
+    });
+    await novoLanc.save();
+
+    // 11) --- CRIAR LANÇAMENTOS DETALHADOS (por item/produto) ---
+    for (const ord of pedidos) {
+      for (const item of ord.itens) {
+        const valorItem = (item.product?.preco || 0) * (item.quantidade || 1);
+        const lancDetalhado = new Lancamento({
+          tipo: 'Receita',
+          clienteFornecedor: mesa?.garcomId?.nome || `Mesa #${mesa.numeroMesa}`,
+          descricao: `Prod: ${item.product?.nome} (MesaFinalizada#${finalized._id})`,
+          categoria: item.product?.categoria,
+          data: finalized.dataFinalizacao,
+          valor: valorItem,
+          status: 'pago',
+          importId: `${finalized._id}`,
+          importSource: 'finalized-tables:product-item',
+        });
+        await lancDetalhado.save();
+      }
     }
 
-    // Gerar a nota fiscal para PDF
-    const pdfPath = await createInvoice(comanda);
+    // 12) Criar Comanda
+    const comandaDoc = new Comanda({
+      finalizedTable: finalized._id,
+      pdfPath: pdfPath,
+    });
+    await comandaDoc.save();
 
-    res.json({ message: 'Mesa finalizada com sucesso.', comanda, pdfPath });
+    // 13) Associar Comanda à FinalizedTable
+    finalized.comanda = comandaDoc._id;
+    await finalized.save();
+
+    // Retorna ao cliente
+    return res.json({
+      message: 'Mesa finalizada com sucesso.',
+      finalized: finalized,
+      lancamentoSumario: novoLanc,
+    });
   } catch (error) {
     console.error('Erro ao finalizar mesa:', error);
-    res.status(500).json({ message: 'Erro ao finalizar mesa', error: error.message });
+    return res.status(500).json({ message: 'Erro ao finalizar mesa', error: error.message });
+  }
+};
+
+exports.getSalesByCategory = async (req, res) => {
+  try {
+    let { dataInicial, dataFinal } = req.query;
+
+    const matchStage = { status: 'Finalizado' };
+
+    if (dataInicial || dataFinal) {
+      matchStage.dataFinalizacao = {};
+      if (dataInicial) {
+        matchStage.dataFinalizacao.$gte = new Date(dataInicial);
+      }
+      if (dataFinal) {
+        matchStage.dataFinalizacao.$lte = new Date(dataFinal);
+      }
+    }
+
+    console.log('\n[DEBUG] matchStage utilizado no aggregation: ', JSON.stringify(matchStage,null,2));
+
+    const aggregation = [
+      { $match: matchStage },
+      { $unwind: '$pedidos' },
+      { $unwind: '$pedidos.itens' },
+      {
+        $group: {
+          _id: '$pedidos.itens.product.categoria.nome',
+          totalVendido: { $sum: '$pedidos.itens.quantidade' },
+        },
+      },
+      { $sort: { totalVendido: -1 } },
+      { $limit: 10 },
+    ];
+
+    console.log('\n[DEBUG] Aggregation pipeline: ', JSON.stringify(aggregation,null,2));
+
+    const salesByCategory = await FinalizedTable.aggregate(aggregation);
+
+    console.log('\n[DEBUG] salesByCategory retornado pelo aggregate: ', salesByCategory);
+
+    res.json({ salesByCategory });
+  } catch (error) {
+    console.error('Erro ao obter sales-by-category:', error);
+    res.status(500).json({ message: 'Erro interno ao obter vendas por categoria.' });
   }
 };
 
 exports.getFinalizedTables = async (req, res) => {
   try {
-    let { 
-      page = 1, 
-      limit = 20, 
-      search = '', 
-      sort = 'dataFinalizacao', 
-      order = 'desc', 
-      dataInicial, 
-      dataFinal 
+    let {
+      page = 1,
+      limit = 50,
+      search = '',
+      sort = 'dataFinalizacao',
+      order = 'desc',
+      dataInicial,
+      dataFinal
     } = req.query;
 
-    const pg = parseInt(page);
-    const lm = parseInt(limit);
+    const pg = parseInt(page, 10);
+    const lm = parseInt(limit, 10);
 
     const query = {};
 
-    // Se search não estiver vazio e for um número, filtra por numeroMesa
+    // Filtro por "search" (para numeroMesa)
     if (search && search.trim() !== '') {
       const searchNum = Number(search);
       if (!isNaN(searchNum)) {
-        // search é numérico, filtra por numeroMesa igual ao número
         query.numeroMesa = searchNum;
-      } else {
-        // Caso queira filtrar por outro campo textual futuramente, pode implementar aqui
-        // Por agora, se não é número, não filtra. Ou seja, sem filtro por search textual.
       }
     }
 
-    // Filtragem por data
-    // Apenas aplica filtro se dataInicial ou dataFinal estiverem preenchidas
+    // Filtro por data
     let inicio = dataInicial && dataInicial.trim() !== '' ? new Date(dataInicial) : null;
     let fim = dataFinal && dataFinal.trim() !== '' ? new Date(dataFinal) : null;
 
@@ -135,9 +426,6 @@ exports.getFinalizedTables = async (req, res) => {
       query.dataFinalizacao = { $lte: fim };
     }
 
-    // Caso search esteja vazio e datas também, query permanece vazia, retornando todos
-    // Isso significa que se não tiver nenhum parâmetro, retornará todos os registros
-
     const sortOption = {};
     sortOption[sort] = order === 'asc' ? 1 : -1;
 
@@ -148,19 +436,49 @@ exports.getFinalizedTables = async (req, res) => {
         path: 'pedidos',
         populate: { path: 'itens.product', model: 'Product' }
       })
+      .populate('garcomId', 'nome')
       .sort(sortOption)
       .skip((pg - 1) * lm)
       .limit(lm);
 
-    res.json({
+    // Soma total taxa e total final no período (desconsiderando paginação)
+    const pipeline = [
+      { $match: query },
+      {
+        $group: {
+          _id: null,
+          sumTaxaServicoAll: { $sum: '$valorTaxaServico' },
+          sumTotalFinalAll: {
+            $sum: {
+              $add: [
+                '$valorTotal',
+                { $ifNull: ['$valorTaxaServico', 0] }
+              ]
+            }
+          }
+        }
+      }
+    ];
+
+    const aggResult = await FinalizedTable.aggregate(pipeline);
+    let sumTaxaServicoAll = 0;
+    let sumTotalFinalAll = 0;
+    if (aggResult && aggResult.length > 0) {
+      sumTaxaServicoAll = aggResult[0].sumTaxaServicoAll || 0;
+      sumTotalFinalAll = aggResult[0].sumTotalFinalAll || 0;
+    }
+
+    return res.json({
       finalized,
       total,
       totalPages: Math.ceil(total / lm),
-      currentPage: pg
+      currentPage: pg,
+      sumTaxaServicoAll,
+      sumTotalFinalAll
     });
   } catch (error) {
     console.error('Erro ao obter mesas finalizadas:', error);
-    res.status(500).json({ message: 'Erro interno ao obter mesas finalizadas' });
+    return res.status(500).json({ message: 'Erro interno ao obter mesas finalizadas' });
   }
 };
 
@@ -182,8 +500,6 @@ exports.getFinalizedTableById = async (req, res) => {
     res.status(500).json({ message: 'Erro interno ao obter mesa finalizada' });
   }
 };
-
-
 
 // Relatório de vendas por período
 exports.getVendasPorPeriodo = async (req, res) => {
@@ -239,7 +555,6 @@ exports.getVendasPorGarcom = async (req, res) => {
     const fim = dataFinal ? new Date(dataFinal) : new Date();
     fim.setHours(23,59,59,999);
 
-    // Agregado que desce nos pedidos, acha o garçom (se houver) e soma total
     const vendas = await FinalizedTable.aggregate([
       {
         $match: {

@@ -1,3 +1,5 @@
+// backend/models/User.js
+
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 
@@ -7,13 +9,39 @@ const UserSchema = new mongoose.Schema({
   senha: { type: String, required: true },
   role: {
     type: String,
-    enum: ['admin', 'manager', 'agent', 'feeder'],
+    enum: [
+      'admin',
+      'manager',
+      'agent',
+      'feeder',
+      'chef',
+      'waiter',
+      'receptionist',
+      'deliveryMan',
+      'kitchenAssistant',
+      'barman',
+      'cleaning'
+    ],
     default: 'agent',
   },
   manager: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // Novo campo
-  permissions: { type: [String], default: [] }, // Lista de permissões
+  permissions: { type: [String], default: [] },
   resetPasswordOTP: { type: String },
+  telefone: { type: String },
   resetPasswordExpires: { type: Date },
+
+  vacancy: { type: String, default: '' },
+  // Ajuste no enum conforme discutido (CLT-Definitivo ou Free Lancer)
+  contractType: {
+    type: String,
+    enum: ['CLT-Definitivo', 'Free Lancer'],
+    default: 'CLT-Definitivo'
+  },
+  imagem: { type: String, default: 'https://placehold.co/150' },
+  refreshTokens: { type: [String], default: [] },
+
+  // Campo para data de contratação
+  hiredSince: { type: String, default: '' },
 }, { timestamps: true });
 
 // Hash da senha antes de salvar

@@ -6,17 +6,20 @@ const authMiddleware = require('../middlewares/authMiddleware');
 const roleMiddleware = require('../middlewares/roleMiddleware');
 
 // Obter lista de mesas finalizadas (com paginação, pesquisa, ordenação)
-router.get('/', authMiddleware, roleMiddleware(['manager', 'admin', 'agent']), finalizedTableController.getFinalizedTables);
+router.get('/', authMiddleware,  finalizedTableController.getFinalizedTables);
 
 // Obter uma mesa finalizada específica
-router.get('/:id', authMiddleware, roleMiddleware(['manager', 'admin', 'agent']), finalizedTableController.getFinalizedTableById);
+router.put('/:id',authMiddleware, finalizedTableController.updateFinalizedTable);
+
 
 // Relatório de vendas por período
-router.get('/relatorios/periodo', authMiddleware, roleMiddleware(['manager', 'admin', 'agent']), finalizedTableController.getVendasPorPeriodo);
 
-// Relatório de vendas por garçom
-router.get('/relatorios/garcom', authMiddleware, roleMiddleware(['manager', 'admin', 'agent']), finalizedTableController.getVendasPorGarcom);
 
-router.post('/:id/finalizar', authMiddleware, roleMiddleware(['manager', 'admin', 'agent']), finalizedTableController.finalizarMesa);
+router.post('/:id/finalizar', authMiddleware,  finalizedTableController.finalizarMesa);
+
+router.get('/sales-by-category', authMiddleware, finalizedTableController.getSalesByCategory);
+
+router.post('/delivery/:orderId/finalizar', authMiddleware, finalizedTableController.finalizarEntrega);
+
 
 module.exports = router;

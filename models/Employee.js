@@ -9,8 +9,8 @@ const EmployeeSchema = new mongoose.Schema({
   permissoes: { type: [String], default: [] },
 }, { timestamps: true });
 
-// Cria índice único para o campo 'email'
-EmployeeSchema.index({ email: 1 }, { unique: true });
+// Removido: índice duplicado
+// EmployeeSchema.index({ email: 1 }, { unique: true });
 
 // Hash da senha antes de salvar
 EmployeeSchema.pre('save', async function (next) {

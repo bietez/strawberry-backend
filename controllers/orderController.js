@@ -10,8 +10,6 @@ const Customer = require('../models/Customer');
 // const printUtil = require('../utils/printUtil');
 
 exports.createOrder = async (req, res) => {
-  console.log('Recebendo requisição para criar pedido...');
-  console.log('Corpo da requisição:', req.body);
   try {
     const {
       clienteId,
@@ -19,26 +17,27 @@ exports.createOrder = async (req, res) => {
       tipoPedido,
       assento,
       itens,
-      numeroAssento,
-      nomeCliente,
+      nomeCliente,      // <--- PEGAMOS AQUI
       enderecoEntrega,
       preparar,
+      observacao,
     } = req.body;
-
-    console.log('itens recebidos:', itens);
 
     if (!itens || !Array.isArray(itens) || itens.length === 0) {
       return res.status(400).json({ message: 'Nenhum item no pedido.' });
     }
 
+    // Valida se cada item tem "product"
     for (const item of itens) {
       if (!item.product) {
         return res.status(400).json({ message: 'Algum item não possui produto selecionado.' });
       }
     }
 
+    // Se você quer um garçom logado
     const garcomId = req.user ? req.user.id : null;
 
+    // Calcula total
     let total = 0;
     for (const item of itens) {
       const product = await Product.findById(item.product);
@@ -53,6 +52,7 @@ exports.createOrder = async (req, res) => {
       total += product.preco * item.quantidade;
     }
 
+    // Se for entrega, define o endereço
     let enderecoEntregaFinal = enderecoEntrega;
     if (tipoPedido === 'entrega') {
       if (!clienteId) {
@@ -69,36 +69,55 @@ exports.createOrder = async (req, res) => {
       }
     }
 
+    // Monta os dados do pedido
     const orderData = {
-      mesa: tipoPedido === 'local' ? mesaId : undefined,
-      assento: tipoPedido === 'local' ? assento : undefined,
-      itens,
-      cliente: tipoPedido === 'entrega' ? clienteId : undefined,
-      garcom: garcomId,
-      total,
-      status: 'Pendente',
       tipoPedido,
-      numeroAssento: tipoPedido === 'local' ? numeroAssento : undefined,
-      nomeCliente: tipoPedido === 'local' ? nomeCliente : undefined,
-      enderecoEntrega: tipoPedido === 'entrega' ? enderecoEntregaFinal : undefined,
-      preparar,
+      itens,
+      nomeCliente,
+      total,
+      garcom: garcomId,
+      preparar: preparar,
+      status: 'Pendente',
+      observacao,
     };
 
+    // Se local, define mesa e assento
+    if (tipoPedido === 'local') {
+      if (!mesaId) {
+        return res.status(400).json({ message: 'mesaId é obrigatório para pedidos local.' });
+      }
+      orderData.mesa = mesaId;
+      if (assento) {
+        orderData.assento = assento;
+      }
+      if (nomeCliente) {
+        orderData.nomeCliente = nomeCliente; // SALVA
+      }
+    }
+
+    // Se entrega, define cliente e endereço
+    if (tipoPedido === 'entrega') {
+      orderData.cliente = clienteId;
+      orderData.enderecoEntrega = enderecoEntregaFinal;
+    }
+
+    // Cria e salva
     const order = new Order(orderData);
     await order.save();
 
-    // Atualizar estoque de produtos
+    // Atualiza estoque
     for (const item of itens) {
       const product = await Product.findById(item.product);
       product.quantidadeEstoque -= item.quantidade;
       await product.save();
     }
 
-    // Caso seja um pedido local, marcar a mesa como 'ocupada'
+    // Se local, marcar mesa como 'ocupada'
     if (tipoPedido === 'local' && mesaId) {
       await Table.findByIdAndUpdate(mesaId, { status: 'ocupada' });
     }
 
+    // Emitir evento de socket, se quiser
     if (global.io) {
       global.io.emit('novo_pedido', order);
     }
@@ -138,6 +157,11 @@ exports.deleteOrder = async (req, res) => {
     await Order.findByIdAndDelete(id);
     console.log('Pedido excluído com sucesso.');
 
+    // Emitir evento 'exclusao_pedido' via Socket.IO
+    if (global.io) {
+      global.io.emit('exclusao_pedido', id);
+    }
+
     res.status(200).json({ message: 'Pedido excluído com sucesso.' });
   } catch (error) {
     console.error('Erro ao excluir pedido:', error);
@@ -158,6 +182,11 @@ exports.updateOrderStatus = async (req, res) => {
     order.status = status;
     await order.save();
 
+    // Emitir evento 'atualizacao_pedido' via Socket.IO
+    if (global.io) {
+      global.io.emit('atualizacao_pedido', order);
+    }
+
     res.json({ message: 'Status do pedido atualizado com sucesso', order });
   } catch (error) {
     console.error('Erro ao atualizar status do pedido:', error);
@@ -167,18 +196,39 @@ exports.updateOrderStatus = async (req, res) => {
 
 exports.getOrders = async (req, res) => {
   try {
-    let { page, limit, mesaId } = req.query;
+    let { page, limit, mesaId, status, tipoPedido } = req.query;
 
+    // Converte para número e define valores padrão
     page = parseInt(page) || 1;
     limit = parseInt(limit) || 20;
 
     const query = {};
+
+    // Se mesaId for fornecido, filtra por mesa
     if (mesaId) {
       query.mesa = mesaId;
     }
 
+    // Se for informado um status, valida e filtra
+    if (status) {
+      const allowedStatuses = ['Pendente', 'Preparando', 'Pronto', 'Entregue', 'Finalizado'];
+      if (!allowedStatuses.includes(status)) {
+        return res
+          .status(400)
+          .json({ message: `Status inválido. Status permitidos: ${allowedStatuses.join(', ')}` });
+      }
+      query.status = status;
+    }
+
+    // Se for informado um tipoPedido, filtra por ele
+    if (tipoPedido) {
+      query.tipoPedido = tipoPedido;
+    }
+
+    // Conta quantos pedidos existem para o filtro informado
     const totalOrders = await Order.countDocuments(query);
 
+    // Busca os pedidos com paginação e popula os relacionamentos
     const orders = await Order.find(query)
       .populate('mesa')
       .populate('cliente')
@@ -188,12 +238,64 @@ exports.getOrders = async (req, res) => {
       .skip((page - 1) * limit)
       .limit(limit);
 
+    // Calcula o total de páginas
     const totalPages = Math.ceil(totalOrders / limit);
 
-    res.json({ orders, totalPages });
+    // Para cada pedido, adiciona a flag "canDelete" (não pode excluir se estiver "Finalizado")
+    const ordersWithFlag = orders.map((order) => {
+      const orderObj = order.toObject();
+      orderObj.canDelete = order.status !== 'Finalizado';
+      return orderObj;
+    });
+
+    res.json({ orders: ordersWithFlag, totalOrders, totalPages });
   } catch (error) {
     console.error('Erro ao obter pedidos:', error);
     res.status(500).json({ message: 'Erro ao obter pedidos.' });
+  }
+};
+
+
+exports.getSalesByCategory = async (req, res) => {
+  try {
+    const { dataInicial, dataFinal } = req.query;
+
+    // Filtro básico para pegar apenas pedidos finalizados
+    const match = {
+      status: 'Finalizado',
+    };
+
+    // Se você quiser filtrar por intervalo de datas de criação
+    if (dataInicial && dataFinal) {
+      match.createdAt = {
+        $gte: new Date(dataInicial),
+        $lte: new Date(dataFinal),
+      };
+    }
+
+    // Faz o 'unwind' de itens e agrupa por 'tipo'
+    const salesByCategory = await Order.aggregate([
+      { $match: match },
+      { $unwind: '$itens' },
+      {
+        $group: {
+          _id: '$itens.tipo',
+          // Aqui, você soma a quantidade (ou valor total, se tiver preço)
+          totalVendido: { $sum: '$itens.quantidade' },
+        },
+      },
+      {
+        $project: {
+          _id: 1,
+          totalVendido: 1,
+        },
+      },
+    ]);
+
+    return res.status(200).json({ salesByCategory });
+  } catch (error) {
+    console.error('Erro ao obter vendas por categoria:', error);
+    return res.status(500).json({ message: 'Erro ao obter vendas por categoria.' });
   }
 };
 
@@ -297,7 +399,7 @@ exports.updateOrder = async (req, res) => {
     }
 
     // Agora, aplicar as atualizações
-    const allowedUpdates = ['mesa', 'assento', 'itens', 'cliente', 'garcom', 'tipoPedido', 'enderecoEntrega', 'preparar'];
+    const allowedUpdates = ['mesa', 'assento', 'itens', 'cliente', 'garcom', 'tipoPedido', 'enderecoEntrega', 'preparar', 'observacao'];
     allowedUpdates.forEach((field) => {
       if (field in updates) {
         order[field] = updates[field];
@@ -319,7 +421,7 @@ exports.updateOrder = async (req, res) => {
 
     await order.save();
 
-    // Emitir evento de atualização via Socket.IO
+    // Emitir evento 'atualizacao_pedido' via Socket.IO
     if (global.io) {
       global.io.emit('atualizacao_pedido', order);
     }

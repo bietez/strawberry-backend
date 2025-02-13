@@ -1,31 +1,32 @@
-// middlewares/authMiddleware.js
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const User = require('../models/User');
 const allPermissions = require("../permissions");
+const { unless } = require('express-unless'); // Importação via desestruturação
 
 async function authMiddleware(req, res, next) {
   const authHeader = req.headers['authorization'];
 
-  if (!authHeader)
+  if (!authHeader) {
     return res.status(401).json({ message: 'Acesso negado. Token não fornecido.' });
+  }
 
-  const token = authHeader.split(' ')[1]; // Extrai o token após 'Bearer '
+  const token = authHeader.split(' ')[1];
 
-  if (!token)
+  if (!token) {
     return res.status(401).json({ message: 'Acesso negado. Token não fornecido.' });
+  }
 
   try {
     const decoded = jwt.verify(token, config.jwtSecret);
     const user = await User.findById(decoded.id);
 
-    if (!user)
+    if (!user) {
       return res.status(401).json({ message: 'Usuário não encontrado.' });
+    }
 
-    // Preparar as permissões do usuário
     let userPermissions = user.permissions;
 
-    // Se a função for admin, atribuir todas as permissões ao usuário
     if (user.role === 'admin') {
       userPermissions = allPermissions;
     }
@@ -38,13 +39,12 @@ async function authMiddleware(req, res, next) {
       permissions: userPermissions,
     };
 
-    console.log(req.user);
-
     next();
   } catch (err) {
-    console.error('Erro na verificação do token:', err);
     res.status(400).json({ message: 'Token inválido.' });
   }
 }
+
+authMiddleware.unless = unless; // Anexa o método unless
 
 module.exports = authMiddleware;

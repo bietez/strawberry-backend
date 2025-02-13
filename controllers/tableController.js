@@ -1,16 +1,19 @@
 // controllers/tableController.js
+
 const mongoose = require('mongoose');
 const Table = require('../models/Table');
+const User = require('../models/User');
 const Ambiente = require('../models/Ambiente');
 const FinalizedTable = require('../models/FinalizedTable');
 const Order = require('../models/Order');
-const { createInvoice } = require('../utils/pdfUtil'); // Supondo que createInvoice está em utils/pdfUtil.js
-const Comanda = require('../models/Comanda'); // Importando o modelo Comanda
+const Reservation = require('../models/Reservation');
+const pdfUtil = require('../utils/pdfUtil');
+const Comanda = require('../models/Comanda');
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
 
-
+// Funções auxiliares
 async function areAllOrdersPaid(pedidos) {
   const pendingOrder = await Order.findOne({ _id: { $in: pedidos }, status: { $ne: 'Entregue' } });
   return !pendingOrder;
@@ -19,202 +22,198 @@ async function areAllOrdersPaid(pedidos) {
 async function sumOrdersValue(pedidos) {
   const orders = await Order.find({ _id: { $in: pedidos } });
   return orders.reduce((acc, order) => acc + order.total, 0);
-};
-
-// **Função única getAvailableTables com populate**
-exports.getAvailableTables = async (req, res) => {
-  try {
-    const availableTables = await Table.find({ status: 'livre' }).populate('ambiente');
-    res.json({ tables: availableTables });
-  } catch (error) {
-    console.error('Erro ao obter mesas disponíveis:', error);
-    res.status(500).json({ message: 'Erro ao obter mesas disponíveis.', error: error.message });
-  }
-};
+}
 
 exports.getTableById = async (req, res) => {
   try {
-    const { tableId } = req.params;
+    const tableId = req.params.id;
+
+    // Verifica se o ID é válido do MongoDB
+    if (!tableId.match(/^[0-9a-fA-F]{24}$/)) {
+      return res.status(400).json({ message: 'ID da mesa inválido.' });
+    }
+
+    // Busca a mesa pelo ID e popula o ambiente
     const table = await Table.findById(tableId).populate('ambiente');
 
     if (!table) {
       return res.status(404).json({ message: 'Mesa não encontrada.' });
     }
 
-    res.json({ table });
+    res.json(table);
   } catch (error) {
-    console.error('Erro ao obter mesa por ID:', error);
-    res.status(500).json({ message: 'Erro ao obter mesa.', error: error.message });
+    console.error('Erro ao buscar mesa por ID:', error);
+    res.status(500).json({ message: 'Erro interno do servidor.' });
   }
 };
 
+// Exemplo: obter mesas livres
+exports.getAvailableTables = async (req, res) => {
+  try {
+    // Consulta para obter todas as mesas com status 'livre'
+    const availableTables = await Table.find({ status: 'livre' })
+      .populate('ambiente', 'nome'); // Popula o campo 'ambiente' apenas com o 'nome'
 
+    return res.json({ tables: availableTables });
+  } catch (error) {
+    console.error('Erro ao obter mesas disponíveis:', error);
+    return res.status(500).json({ message: 'Erro ao obter mesas disponíveis.' });
+  }
+};
 
-
-// Finalizar uma mesa
+// Finalizar mesa (exemplo completo com PDF e comanda)
 exports.finalizarMesa = async (req, res) => {
   const mesaId = req.params.id;
-  const { formaPagamento, valorPago, tipoDesconto, valorDesconto } = req.body;
+  const {
+    formaPagamento,
+    valorPago,
+    tipoDesconto,
+    valorDesconto,
+    cobrarTaxaServico,
+    valorTaxaServico,
+    garcomId,
+  } = req.body;
 
   try {
-    // Validar mesa
-    const mesa = await Table.findById(mesaId).populate('ambiente');
+    // 1. Verificação básica
+    if (
+      !formaPagamento ||
+      valorPago === undefined ||
+      !tipoDesconto ||
+      valorDesconto === undefined ||
+      !garcomId
+    ) {
+      return res.status(400).json({ message: 'Dados de pagamento ou garçom incompletos.' });
+    }
+
+    // 2. Verificação do garçom
+    const garcom = await User.findById(garcomId);
+    if (!garcom || (garcom.role !== 'waiter' && garcom.role !== 'agent')) {
+      return res.status(400).json({ message: 'Garçom inválido ou não autorizado.' });
+    }
+
+    // 3. Buscar a mesa e popular ambiente e garçom
+    const mesa = await Table.findById(mesaId).populate('ambiente').populate('garcomId', 'nome');
     if (!mesa) {
-      return res.status(404).json({ message: 'Mesa não encontrada' });
+      return res.status(404).json({ message: 'Mesa não encontrada.' });
     }
-
     if (mesa.status !== 'ocupada') {
-      return res.status(400).json({ message: 'Mesa já está finalizada ou não está ocupada' });
+      return res.status(400).json({ message: 'Mesa não está ocupada ou já foi finalizada.' });
     }
 
-    // Buscar pedidos da mesa com status 'Entregue'
+    // 4. Atualizar garçom
+    mesa.garcomId = garcomId;
+    await mesa.save();
+
+    // 5. Pedidos
     const pedidos = await Order.find({ mesa: mesaId, status: 'Entregue' }).populate('itens.product');
     if (pedidos.length === 0) {
-      return res.status(400).json({ message: 'Nenhum pedido entregue para finalizar nesta mesa' });
+      return res.status(400).json({ message: 'Nenhum pedido com status "Entregue" para finalizar.' });
     }
 
-    // Calcular total da mesa
-    let totalMesa = pedidos.reduce((acc, pedido) => acc + pedido.total, 0);
-
-    // Aplicar desconto
+    // 6. Cálculo de total
+    let totalMesa = pedidos.reduce((acc, pedido) => acc + (pedido.total || 0), 0);
     let totalComDesconto = totalMesa;
     if (tipoDesconto === 'porcentagem') {
       const pct = parseFloat(valorDesconto) || 0;
-      totalComDesconto = totalMesa - (totalMesa * (pct / 100));
+      totalComDesconto = totalMesa - totalMesa * (pct / 100);
     } else if (tipoDesconto === 'valor') {
       const val = parseFloat(valorDesconto) || 0;
       totalComDesconto = Math.max(totalMesa - val, 0);
     }
 
-    // Verificar se o valor pago é suficiente (caso pagamento em dinheiro)
-    if (formaPagamento === 'dinheiro') {
-      const pago = parseFloat(valorPago) || 0;
-      if (pago < totalComDesconto) {
-        return res.status(400).json({ message: 'Valor pago menor que o total com desconto' });
-      }
+    // 7. Taxa de serviço
+    let taxaServicoValor = 0;
+    if (cobrarTaxaServico) {
+      taxaServicoValor = parseFloat(valorTaxaServico) || 0;
+      totalComDesconto += taxaServicoValor;
     }
 
-    // Criar comanda
+    // 8. Validar valor pago
+    if (valorPago < totalComDesconto) {
+      return res.status(400).json({ message: 'Valor pago é insuficiente.' });
+    }
+
+    // 9. Criar Comanda
     const comandaData = {
       mesa: mesa.numeroMesa,
-      pedidos: pedidos.map(pedido => ({
-        orderNumber: pedido.orderNumber,
-        itens: pedido.itens.map(item => ({
-          quantidade: item.quantidade,
-          nome: item.product.nome,
-          preco: item.product.preco,
-          total: item.product.preco * item.quantidade,
-        })),
-        total: pedido.total,
-      })),
+      ambienteId: mesa.ambiente._id,
+      garcomId,
+      pedidos: pedidos.map((p) => p._id),
       valorTotal: totalMesa,
-      tipoDesconto,
+      tipoDesconto: tipoDesconto || 'nenhum',
       valorDesconto: parseFloat(valorDesconto) || 0,
       totalComDesconto,
       formaPagamento,
       valorPago: parseFloat(valorPago) || 0,
-      troco: 0, // Pode ser calculado se necessário
+      cobrarTaxaServico: !!cobrarTaxaServico,
+      troco:
+        !!cobrarTaxaServico &&
+        Array.isArray(formaPagamento) &&
+        formaPagamento.includes('dinheiro')
+          ? parseFloat(valorPago) - totalComDesconto
+          : 0,
       dataFinalizacao: new Date(),
     };
-
-    // Se for dinheiro, calcular troco
-    if (formaPagamento === 'dinheiro') {
-      const pago = parseFloat(valorPago) || 0;
-      const troco = pago > totalComDesconto ? (pago - totalComDesconto) : 0;
-      comandaData.troco = troco;
-    }
 
     const comanda = new Comanda(comandaData);
     await comanda.save();
 
-    // Gerar PDF da comanda
-    const PDFDocument = require('pdfkit');
-    const fs = require('fs');
-    const path = require('path');
-
-    const pdfDoc = new PDFDocument();
-    const pdfDir = path.join(__dirname, '../public/comandas');
-    const pdfFilename = `${comanda._id}.pdf`;
-    const pdfPathFull = path.join(pdfDir, pdfFilename);
-
-    fs.mkdirSync(pdfDir, { recursive: true });
-
-    pdfDoc.pipe(fs.createWriteStream(pdfPathFull));
-
-    // Cabeçalho do PDF
-    pdfDoc.fontSize(20).text(`Comanda - Mesa ${mesa.numeroMesa}`, { align: 'center' });
-    pdfDoc.moveDown();
-
-    pedidos.forEach(pedido => {
-      pdfDoc.fontSize(16).text(`Pedido #${pedido.orderNumber}`);
-      pedido.itens.forEach(item => {
-        pdfDoc.fontSize(12).text(`${item.quantidade} x ${item.product.nome} - R$ ${(item.product.preco * item.quantidade).toFixed(2)}`);
-      });
-      pdfDoc.fontSize(14).text(`Total do Pedido: R$ ${pedido.total.toFixed(2)}`);
-      pdfDoc.moveDown();
-    });
-
-    pdfDoc.fontSize(14).text(`Total da Mesa: R$ ${totalMesa.toFixed(2)}`);
-    if (tipoDesconto === 'porcentagem') {
-      pdfDoc.text(`Desconto: ${valorDesconto}%`);
-    } else if (tipoDesconto === 'valor') {
-      pdfDoc.text(`Desconto: R$ ${parseFloat(valorDesconto).toFixed(2)}`);
-    } else {
-      pdfDoc.text(`Desconto: Nenhum`);
+    // 10. Geração PDF
+    let pdfPathRelative;
+    try {
+      pdfPathRelative = await pdfUtil.createInvoice(comanda);
+    } catch (err) {
+      console.error('Erro ao gerar PDF:', err);
+      return res.status(500).json({ message: 'Erro ao gerar PDF da comanda.' });
     }
+    comanda.pdfPath = pdfPathRelative;
+    await comanda.save();
 
-    pdfDoc.text(`Total com Desconto: R$ ${totalComDesconto.toFixed(2)}`);
-    pdfDoc.text(`Forma de Pagamento: ${formaPagamento}`);
-    pdfDoc.text(`Valor Pago: R$ ${(parseFloat(valorPago) || 0).toFixed(2)}`);
-    if (formaPagamento === 'dinheiro') {
-      const pago = parseFloat(valorPago) || 0;
-      const troco = pago - totalComDesconto;
-      if (troco > 0) {
-        pdfDoc.text(`Troco: R$ ${troco.toFixed(2)}`);
-      }
-    }
-
-    pdfDoc.end();
-
-    const pdfPathRelative = `/comandas/${pdfFilename}`;
-
-    // Criar registro de mesa finalizada
+    // 11. Criação do FinalizedTable
     const finalizedMesa = new FinalizedTable({
       numeroMesa: mesa.numeroMesa,
       ambienteId: mesa.ambiente._id,
-      garcomId: req.user.id,
-      pedidos: pedidos.map(pedido => pedido._id),
+      garcomId,
+      pedidos: pedidos.map((p) => p._id),
       valorTotal: totalMesa,
       formaPagamento,
       valorPago: parseFloat(valorPago) || 0,
       tipoDesconto: tipoDesconto || 'nenhum',
       valorDesconto: parseFloat(valorDesconto) || 0,
+      valorTaxaServico: taxaServicoValor,
+      cobrarTaxaServico: !!cobrarTaxaServico,
       dataFinalizacao: new Date(),
       pdfPath: pdfPathRelative,
     });
-
     await finalizedMesa.save();
 
-    // Atualizar status da mesa para 'livre'
-    mesa.status = 'livre';
+    // 12. Atualizar mesa e pedidos
+    // Define a mesa como "suja" ao finalizar
+    mesa.status = 'suja';
+    mesa.assentos.forEach(assento => {
+      assento.nomeCliente = null;
+    });
+    mesa.seatSeparation = false;
     await mesa.save();
-
-    // Atualizar status dos pedidos para 'Finalizado'
     await Order.updateMany({ mesa: mesaId, status: 'Entregue' }, { status: 'Finalizado' });
 
-    // Retornar resposta com o caminho do PDF
-    res.json({ comanda, pdfPath: pdfPathRelative });
+    return res.json({
+      message: 'Mesa finalizada com sucesso.',
+      comanda,
+      finalizedMesa,
+      pdfPath: pdfPathRelative,
+    });
   } catch (error) {
     console.error('Erro ao finalizar mesa:', error);
-    res.status(500).json({ message: 'Erro ao finalizar mesa' });
+    return res.status(500).json({ message: 'Erro ao finalizar mesa' });
   }
 };
 
+// Criar mesa (agora recebe também o campo "formato")
 exports.createTable = async (req, res) => {
   try {
-    const { numeroMesa, ambienteId, capacidade } = req.body;
-
-    console.log('Dados recebidos para criação de mesa:', req.body);
+    const { numeroMesa, ambienteId, capacidade, formato } = req.body;
 
     const ambiente = await Ambiente.findById(ambienteId);
     if (!ambiente) {
@@ -236,12 +235,12 @@ exports.createTable = async (req, res) => {
       ambiente: ambienteId,
       capacidade,
       assentos,
-      status: 'livre'
+      status: 'livre',
+      // Se não for informado, define como "quadrada"
+      formato: formato || 'quadrada'
     });
 
     await table.save();
-
-    console.log('Mesa criada:', table);
 
     res.status(201).json({ message: 'Mesa criada com sucesso', table });
   } catch (error) {
@@ -250,19 +249,7 @@ exports.createTable = async (req, res) => {
   }
 };
 
-// **Remova a segunda definição de getAvailableTables**
-/*
-exports.getAvailableTables = async (req, res) => {
-  try {
-    const availableTables = await Table.find({ status: 'livre' });
-    res.json({ tables: availableTables });
-  } catch (error) {
-    console.error('Erro ao obter mesas disponíveis:', error);
-    res.status(500).json({ message: 'Erro ao obter mesas disponíveis.', error: error.message });
-  }
-};
-*/
-
+// Pegar todas as mesas
 exports.getTables = async (req, res) => {
   try {
     const tables = await Table.find().populate('ambiente');
@@ -272,10 +259,19 @@ exports.getTables = async (req, res) => {
   }
 };
 
+exports.getTablesDashboard = async (req, res) => {
+  try {
+    const tables = await Table.find().populate('ambiente');
+    res.json({ tables });
+  } catch (error) {
+    res.status(400).json({ message: 'Erro ao obter mesas', error: error.message });
+  }
+};
+
+// Pegar mesas com paginação/ordenacao/pesquisa
 exports.getAdvancedTables = async (req, res) => {
   try {
     let { page = 1, limit = 20, sort = 'numeroMesa', order = 'asc', search = '' } = req.query;
-
     page = parseInt(page);
     limit = parseInt(limit);
 
@@ -312,39 +308,152 @@ exports.getAdvancedTables = async (req, res) => {
   }
 };
 
+exports.freeTable = async (req, res) => {
+  try {
+    const table = await Table.findById(req.params.id);
+    if (!table) {
+      return res.status(404).json({ message: 'Mesa não encontrada' });
+    }
+
+    // Verifica se a mesa está em um estado que pode ser liberado: "ocupada" ou "suja"
+    if (table.status !== 'ocupada' && table.status !== 'suja') {
+      return res.status(400).json({ message: 'A mesa não está ocupada nem suja e, portanto, não pode ser liberada.' });
+    }
+
+    table.status = 'livre';
+    await table.save();
+
+    // Emite evento via Socket.IO para notificar que a mesa foi liberada
+    const io = req.app.get('io');
+    io.emit('tableFreed', { tableNumber: table.numeroMesa, capacity: table.capacidade });
+
+    res.json({ message: 'Mesa liberada', table });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+
+exports.updateSeatSeparation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { seatSeparation } = req.body;
+
+    const table = await Table.findById(id);
+    if (!table) {
+      return res.status(404).json({ message: 'Mesa não encontrada.' });
+    }
+
+    table.seatSeparation = seatSeparation;
+
+    if (!seatSeparation) {
+      table.assentos.forEach((assento) => {
+        assento.nomeCliente = null;
+      });
+    } else {
+      const currentAssentos = table.assentos.length;
+      if (currentAssentos < table.capacidade) {
+        for (let i = currentAssentos + 1; i <= table.capacidade; i++) {
+          table.assentos.push({ numeroAssento: i, nomeCliente: null, pedidos: [] });
+        }
+      } else if (currentAssentos > table.capacidade) {
+        table.assentos = table.assentos.slice(0, table.capacidade);
+      }
+    }
+
+    await table.save();
+
+    return res.json({
+      message: 'seatSeparation atualizado com sucesso.',
+      table,
+    });
+  } catch (error) {
+    console.error('Erro ao atualizar seatSeparation:', error);
+    return res.status(500).json({ message: 'Erro interno no servidor.' });
+  }
+};
+
+exports.updateAssentos = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { assentos } = req.body;
+
+    const table = await Table.findById(id);
+    if (!table) {
+      return res.status(404).json({ message: 'Mesa não encontrada.' });
+    }
+
+    if (!table.seatSeparation) {
+      return res.status(400).json({ message: 'Separação por assentos não está ativada para esta mesa.' });
+    }
+
+    if (assentos.length !== table.capacidade) {
+      return res.status(400).json({ message: `Número de assentos deve ser igual à capacidade (${table.capacidade}).` });
+    }
+
+    assentos.forEach((reqSeat) => {
+      const seat = table.assentos.find((s) => s.numeroAssento === reqSeat.numeroAssento);
+      if (seat) {
+        seat.nomeCliente = reqSeat.nomeCliente || null;
+      } else {
+        table.assentos.push({
+          numeroAssento: reqSeat.numeroAssento,
+          nomeCliente: reqSeat.nomeCliente || null,
+          pedidos: [],
+        });
+      }
+    });
+
+    await table.save();
+    return res.json({
+      message: 'Assentos atualizados com sucesso!',
+      table,
+    });
+  } catch (error) {
+    console.error('Erro ao atualizar assentos:', error);
+    return res.status(500).json({ message: 'Erro interno.' });
+  }
+};
+
+// Atualizar mesa (agora também atualiza o campo "formato" se fornecido)
+// Atualizar mesa (agora também atualiza o campo "formato" e "rotation" se fornecidos)
 exports.updateTable = async (req, res) => {
   try {
     const { tableId } = req.params;
     const updates = req.body;
-
-    console.log('Dados recebidos para atualização de mesa:', updates);
-
-    if (updates.capacidade && updates.capacidade < 1) {
-      return res.status(400).json({ message: 'Capacidade deve ser pelo menos 1.' });
-    }
-
-    if (updates.ambienteId || updates.ambiente) { // Ajustado para capturar ambienteId ou ambiente
-      const ambienteId = updates.ambienteId || updates.ambiente;
-      const ambiente = await Ambiente.findById(ambienteId);
-      if (!ambiente) {
-        return res.status(404).json({ message: 'Ambiente não encontrado' });
-      }
-    }
-
-    if (updates.numeroMesa) {
-      const mesaExistente = await Table.findOne({ numeroMesa: updates.numeroMesa, _id: { $ne: tableId } });
-      if (mesaExistente) {
-        return res.status(400).json({ message: 'Número da mesa já está em uso.' });
-      }
-    }
 
     const table = await Table.findById(tableId);
     if (!table) {
       return res.status(404).json({ message: 'Mesa não encontrada' });
     }
 
+    // Atualizar número da mesa
+    if (updates.numeroMesa !== undefined) {
+      const mesaExistente = await Table.findOne({
+        numeroMesa: updates.numeroMesa,
+        _id: { $ne: tableId },
+      });
+      if (mesaExistente) {
+        return res.status(400).json({ message: 'Número da mesa já está em uso.' });
+      }
+      table.numeroMesa = updates.numeroMesa;
+    }
+
+    // Atualizar ambiente
+    if (updates.ambienteId || updates.ambiente !== undefined) {
+      const ambienteId = updates.ambienteId || updates.ambiente;
+      const ambiente = await Ambiente.findById(ambienteId);
+      if (!ambiente) {
+        return res.status(404).json({ message: 'Ambiente não encontrado' });
+      }
+      table.ambiente = ambienteId;
+    }
+
     // Atualizar capacidade
-    if (updates.capacidade && updates.capacidade !== table.capacidade) {
+    if (updates.capacidade !== undefined && updates.capacidade !== table.capacidade) {
+      if (updates.capacidade < 1) {
+        return res.status(400).json({ message: 'Capacidade deve ser pelo menos 1.' });
+      }
       if (updates.capacidade > table.capacidade) {
         for (let i = table.capacidade + 1; i <= updates.capacidade; i++) {
           table.assentos.push({ numeroAssento: i });
@@ -355,13 +464,40 @@ exports.updateTable = async (req, res) => {
       table.capacidade = updates.capacidade;
     }
 
-    if (updates.numeroMesa !== undefined) table.numeroMesa = updates.numeroMesa;
-    if (updates.ambienteId || updates.ambiente !== undefined) table.ambiente = updates.ambienteId || updates.ambiente;
-    if (updates.position !== undefined) table.position = updates.position;
+    // Atualizar o campo "formato" se fornecido
+    if (updates.formato !== undefined) {
+      table.formato = updates.formato;
+    }
+
+    // **Novo:** Atualizar o campo "rotation" se fornecido
+    if (updates.rotation !== undefined) {
+      table.rotation = updates.rotation;
+    }
+
+    // Atualizar posição (pos_x, pos_y, width, height)
+    if (updates.posicao && Array.isArray(updates.posicao)) {
+      if (updates.posicao.length > 0) {
+        const { pos_x, pos_y, width, height } = updates.posicao[0];
+        if (table.posicao.length === 0) {
+          table.posicao = updates.posicao;
+        } else {
+          table.posicao[0].pos_x = pos_x;
+          table.posicao[0].pos_y = pos_y;
+          table.posicao[0].width = width;
+          table.posicao[0].height = height;
+        }
+      }
+    }
+
+    // Atualizações adicionais (ex.: width, height se existirem)
+    if (updates.width !== undefined && typeof updates.width === 'number') {
+      table.width = updates.width;
+    }
+    if (updates.height !== undefined && typeof updates.height === 'number') {
+      table.height = updates.height;
+    }
 
     await table.save();
-
-    console.log('Mesa atualizada:', table);
 
     res.json({ message: 'Mesa atualizada com sucesso', table });
   } catch (error) {
@@ -370,6 +506,8 @@ exports.updateTable = async (req, res) => {
   }
 };
 
+
+// Excluir mesa
 exports.deleteTable = async (req, res) => {
   try {
     const { tableId } = req.params;
@@ -381,6 +519,7 @@ exports.deleteTable = async (req, res) => {
   }
 };
 
+// Atualizar status da mesa
 exports.updateTableStatus = async (req, res) => {
   try {
     const { tableId } = req.params;
@@ -391,7 +530,6 @@ exports.updateTableStatus = async (req, res) => {
       return res.status(400).json({ message: 'Status inválido.' });
     }
 
-    // Populando os pedidos dentro dos assentos
     const table = await Table.findById(tableId).populate({
       path: 'assentos.pedidos',
       model: 'Order',
@@ -402,28 +540,19 @@ exports.updateTableStatus = async (req, res) => {
     }
 
     if (status.toLowerCase() === 'livre') {
-      // Extrair todos os IDs de pedidos dos assentos
-      const pedidoIds = table.assentos.reduce((acc, assento) => {
-        if (assento.pedidos && assento.pedidos.length > 0) {
-          return acc.concat(assento.pedidos.map(pedido => pedido._id));
-        }
-        return acc;
-      }, []);
+      table.occupiedSince = null;
+    }
 
-      if (pedidoIds.length > 0) {
-        const allPaid = await areAllOrdersPaid(pedidoIds);
-        if (!allPaid) {
-          return res.status(400).json({ message: 'Não é possível marcar como livre. Há pedidos pendentes.' });
-        }
+    if (status.toLowerCase() === 'ocupada') {
+      if (table.status !== 'ocupada') {
+        table.occupiedSince = new Date();
       }
     }
 
-    if (status.toLowerCase() === 'ocupada' && table.status !== 'livre') {
-      return res.status(400).json({ message: 'Só é possível marcar como ocupada se a mesa estiver livre.' });
-    }
-
     if (status.toLowerCase() === 'reservada' && table.status !== 'livre') {
-      return res.status(400).json({ message: 'Só é possível marcar como reservada se a mesa estiver livre.' });
+      return res.status(400).json({
+        message: 'Só é possível marcar como reservada se a mesa estiver livre.'
+      });
     }
 
     table.status = status.toLowerCase();
@@ -436,61 +565,28 @@ exports.updateTableStatus = async (req, res) => {
   }
 };
 
-exports.finalizeTable = async (req, res) => {
+exports.getTablesByAmbiente = async (req, res) => {
   try {
-    const { tableId } = req.params;
-    const { formaPagamento, valorPago, valorDesconto, tipoDesconto } = req.body;
+    const { ambienteId } = req.params;
 
-    const table = await Table.findById(tableId).populate('orders');
-    if (!table) {
-      return res.status(404).json({ message: 'Mesa não encontrada' });
+    if (!mongoose.Types.ObjectId.isValid(ambienteId)) {
+      return res.status(400).json({ message: 'ID de ambiente inválido.' });
     }
 
-    if (table.status !== 'ocupada') {
-      return res.status(400).json({ message: 'Mesa não está ocupada.' });
+    const ambiente = await Ambiente.findById(ambienteId);
+    if (!ambiente) {
+      return res.status(404).json({ message: 'Ambiente não encontrado.' });
     }
 
-    const pedidoIds = table.pedidos.map(p => p._id || p);
+    const tables = await Table.find({ ambiente: ambienteId })
+      .populate('ambiente');
 
-    const allPaid = await areAllOrdersPaid(pedidoIds);
-    if (!allPaid) {
-      return res.status(400).json({ message: 'Existem pedidos pendentes nesta mesa.' });
-    }
-
-    let valorTotal = await sumOrdersValue(pedidoIds);
-
-    // Aplicar desconto, se houver
-    let valorFinal = valorTotal;
-    if (tipoDesconto === 'porcentagem' && valorDesconto > 0) {
-      valorFinal = valorFinal - (valorFinal * (valorDesconto / 100));
-    } else if (tipoDesconto === 'valor' && valorDesconto > 0) {
-      valorFinal = Math.max(valorFinal - valorDesconto, 0);
-    }
-
-    // Caso pagamento em dinheiro, verificar se valorPago é suficiente
-    if (formaPagamento === 'dinheiro' && valorPago < valorFinal) {
-      return res.status(400).json({ message: 'Valor pago menor que o total final com desconto.' });
-    }
-
-    const finalizedTable = new FinalizedTable({
-      numeroMesa: table.numeroMesa,
-      ambienteId: table.ambiente,
-      pedidos: pedidoIds,
-      valorTotal: valorFinal,
-      formaPagamento: formaPagamento || 'dinheiro',
-      valorPago: valorPago || 0,
-      tipoDesconto: tipoDesconto || 'nenhum',
-      valorDesconto: valorDesconto || 0,
-    });
-    await finalizedTable.save();
-
-    table.status = 'livre';
-    table.pedidos = [];
-    await table.save();
-
-    return res.status(200).json({ message: 'Mesa finalizada com sucesso', table, finalizedTable });
+    res.json({ tables });
   } catch (error) {
-    console.error('Erro ao finalizar mesa:', error);
-    return res.status(500).json({ message: 'Erro ao finalizar mesa', error: error.message });
+    console.error('Erro ao obter mesas por ambiente:', error);
+    res.status(500).json({ 
+      message: 'Erro ao obter mesas por ambiente.', 
+      error: error.message 
+    });
   }
 };

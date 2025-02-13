@@ -3,6 +3,8 @@ const AutoIncrement = require('mongoose-sequence')(mongoose);
 
 const OrderSchema = new mongoose.Schema(
   {
+    nomeCliente: { type: String, default: '' },
+    observacao: { type: String, default: '' }, // Novo campo de Observação
     orderNumber: { type: Number, unique: true }, // Campo auto-incrementado
     mesa: { type: mongoose.Schema.Types.ObjectId, ref: 'Table' },
     assento: { type: String },
@@ -30,6 +32,7 @@ const OrderSchema = new mongoose.Schema(
     enderecoEntrega: { type: String }, // Se tipoPedido for 'entrega'
     preparar: { type: Boolean, default: true }, // Novo campo 'preparar' por pedido
   },
+  
   { timestamps: true }
 );
 

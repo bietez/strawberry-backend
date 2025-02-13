@@ -34,8 +34,26 @@ const upload = multer({
   fileFilter: fileFilter,
 });
 
-router.get('/', authMiddleware, roleMiddleware(['admin']), configController.getConfig);
-router.post('/', authMiddleware, roleMiddleware(['admin']), upload.single('logotipo'), configController.createConfig);
-router.put('/', authMiddleware, roleMiddleware(['admin']), upload.single('logotipo'), configController.updateConfig);
+router.get('/', authMiddleware, configController.getConfig);
+router.post('/', authMiddleware, upload.single('logotipo'), configController.createConfig);
+router.put('/', authMiddleware, upload.single('logotipo'), configController.updateConfig);
+
+// GET /settings/draggable: retorna { draggable: true/false }
+router.get(
+  '/draggable',
+  authMiddleware,
+  configController.getDraggable
+);
+
+// PUT /settings/draggable: atualiza { draggable: true/false }
+router.put(
+  '/draggable',
+  authMiddleware,
+  configController.updateDraggable
+);
+
+router.get('/cnpj/:cnpj', configController.fetchCnpj);
+
+
 
 module.exports = router;
